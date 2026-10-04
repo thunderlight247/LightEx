@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: lightex-db
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: lightex
+      POSTGRES_USER: lightex_app
+      POSTGRES_PASSWORD: 2447
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - lightex_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  lightex_postgres_data:
