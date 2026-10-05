@@ -2,15 +2,19 @@ package main
 
 import (
 	"github.com/gin-gonic/gin"
+
 	auth "github.com/light-group/light-ex-backend/internal/modules/auth"
+	wallet "github.com/light-group/light-ex-backend/internal/modules/wallet"
 	"github.com/light-group/light-ex-backend/internal/platform/bootstrap"
+	"github.com/light-group/light-ex-backend/internal/platform/middleware"
+	jwtservice "github.com/light-group/light-ex-backend/internal/platform/security/jwt"
 )
 
 // RegisterRoutes registers all API routes.
 func RegisterRoutes(
 	router *gin.Engine,
-	app *bootstrap.Application) {
-
+	app *bootstrap.Application,
+) {
 	// API root
 	api := router.Group("/api")
 
@@ -26,11 +30,18 @@ func RegisterRoutes(
 		})
 	})
 
+	// Shared JWT service & middleware
+	jwtService := jwtservice.New(app.Config.JWT)
+	authMiddleware := middleware.Authentication(jwtService)
+
 	// Authentication
 	authModule := auth.New(
 		app.Config,
 		app.Database.SQL(),
 	)
-
 	authModule.RegisterRoutes(v1)
+
+	// Wallet
+	walletModule := wallet.New(app.Database.SQL())
+	walletModule.RegisterRoutes(v1, authMiddleware)
 }

@@ -22,3 +22,26 @@ Content-Type: application/json
     "email": "john@example.com",
     "password": "VeryStrongPassword123!"
 }
+
+###
+
+### Create Wallet
+POST http://localhost:8080/api/v1/wallets
+Content-Type: application/json
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+
+{
+    "currency": "USD"
+}
+
+###
+
+### Get My Wallet
+GET http://localhost:8080/api/v1/wallets/me
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+
+###
+
+### Get Wallet By ID
+GET http://localhost:8080/api/v1/wallets/PASTE_WALLET_ID_HERE
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
