@@ -691,7 +691,7 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 
 ### 4.7 Treasury/internal settlement
 - [ ] Treasury domain/service
-- [ ] Internal settlement
+- [x] Internal settlement
 - [ ] Reserve/liquidity handling
 
 ### 4.8 Idempotency

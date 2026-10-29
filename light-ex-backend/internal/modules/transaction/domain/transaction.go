@@ -20,6 +20,7 @@ const (
 	TransactionTypeTransfer   TransactionType = "TRANSFER"
 	TransactionTypeExchange   TransactionType = "EXCHANGE"
 	TransactionTypeAdjustment TransactionType = "ADJUSTMENT"
+	TransactionTypeSettlement TransactionType = "SETTLEMENT"
 )
 
 type TransactionStatus string
@@ -75,7 +76,8 @@ func IsValidType(t TransactionType) bool {
 		TransactionTypeWithdrawal,
 		TransactionTypeTransfer,
 		TransactionTypeExchange,
-		TransactionTypeAdjustment:
+		TransactionTypeAdjustment,
+		TransactionTypeSettlement:
 		return true
 	default:
 		return false
