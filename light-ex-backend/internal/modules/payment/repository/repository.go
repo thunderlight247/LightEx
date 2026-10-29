@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -29,4 +30,7 @@ type Repository interface {
 
 	// FindByUserID retrieves a user's payments ordered by creation date desc with pagination.
 	FindByUserID(ctx context.Context, userID uuid.UUID, limit, offset int) ([]*domain.Payment, error)
+
+	// FindByStatusAndUpdatedBefore retrieves payments in the given status whose updated_at timestamp is older than before.
+	FindByStatusAndUpdatedBefore(ctx context.Context, status domain.Status, before time.Time, limit int) ([]*domain.Payment, error)
 }

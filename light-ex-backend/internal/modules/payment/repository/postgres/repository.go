@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -173,6 +174,37 @@ func (r *Repository) FindByUserID(ctx context.Context, userID uuid.UUID, limit, 
 		userID,
 		limit,
 		offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var payments []*domain.Payment
+	for rows.Next() {
+		p, err := scanRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		payments = append(payments, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return payments, nil
+}
+
+func (r *Repository) FindByStatusAndUpdatedBefore(ctx context.Context, status domain.Status, before time.Time, limit int) ([]*domain.Payment, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+
+	rows, err := r.db.QueryContext(
+		ctx,
+		selectColumns+"WHERE status = $1 AND updated_at <= $2\nORDER BY updated_at ASC\nLIMIT $3\n",
+		string(status),
+		before,
+		limit,
 	)
 	if err != nil {
 		return nil, err

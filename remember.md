@@ -711,12 +711,12 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [x] Mobile Money integration (MTN MoMo client implementing `provider.Provider` with `Collect` via `requesttopay`, `Disburse` via `transfer`, OAuth2 token caching, and transaction status polling; covered by client_test.go, token_test.go, integration_test.go)
 - [x] Webhooks (MTN MoMo webhook callback parser and Gin handler; covered by webhook_test.go)
 - [x] Callback processing (CallbackNotification mapping to generic provider status and processor hook)
-- [ ] Bank transfer integration
-- [ ] Crypto deposit
-- [ ] Crypto withdrawal
+- [x] Bank transfer integration (payment/provider/bank: Bank transfer provider with account validation, Collect, Disburse, and CheckStatus; covered by bank_test.go)
+- [x] Crypto deposit (payment/provider/crypto: Crypto deposit address assignment and confirmation tracking; covered by crypto_test.go)
+- [x] Crypto withdrawal (payment/provider/crypto: On-chain transaction dispatch and hash tracking; covered by crypto_test.go)
+- [x] Retry mechanism (payment/provider/retry: Exponential backoff with jitter and network transient error classification; covered by retry_test.go)
+- [x] Reconciliation (payment/reconciliation: Background worker finding stale processing payments and atomically settling or failing with balance unlock; covered by worker_test.go)
 - [ ] Liquidity provider integration
-- [ ] Retry mechanism
-- [ ] Reconciliation
 
 ## ⏳ Phase 6 — KYC / Risk / Limits
 

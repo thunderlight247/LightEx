@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
@@ -66,6 +67,17 @@ func (m *memRepo) FindByUserID(_ context.Context, userID uuid.UUID, _, _ int) ([
 	var out []*domain.Payment
 	for _, p := range m.byID {
 		if p.UserID == userID {
+			cp := *p
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (m *memRepo) FindByStatusAndUpdatedBefore(_ context.Context, status domain.Status, before time.Time, _ int) ([]*domain.Payment, error) {
+	var out []*domain.Payment
+	for _, p := range m.byID {
+		if p.Status == status && !p.UpdatedAt.After(before) {
 			cp := *p
 			out = append(out, &cp)
 		}
