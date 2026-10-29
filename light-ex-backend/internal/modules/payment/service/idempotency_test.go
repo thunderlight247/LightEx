@@ -7,6 +7,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+
+	paymentdomain "github.com/light-group/light-ex-backend/internal/modules/payment/domain"
+	paymentpostgres "github.com/light-group/light-ex-backend/internal/modules/payment/repository/postgres"
 )
 
 func TestDeposit_RetrySameReferenceReturnsOriginalWithoutSecondCredit(t *testing.T) {
@@ -64,5 +67,52 @@ func TestDeposit_ReusedReferenceDifferentAmountIsConflict(t *testing.T) {
 	}
 	if got := readBalance(t, db, walletID); !got.Equal(decimal.NewFromInt(125)) {
 		t.Fatalf("balance changed on conflict: got %s, want 125", got)
+	}
+}
+
+// A FAILED payment is final: its reference cannot be reused, and the user
+// must start a new request with a new reference.
+func TestDeposit_FailedPaymentReferenceCannotBeReused(t *testing.T) {
+	db := getDepositTestDB(t)
+	userID, walletID := seedUserWallet(t, db, "100")
+	ctx := context.Background()
+	ref := "IDEM-FAILED-" + uuid.NewString()
+
+	failed, err := paymentdomain.NewPayment(userID, walletID, paymentdomain.DirectionDeposit,
+		"BANK_TRANSFER", decimal.NewFromInt(25), "USD", ref, "", nil)
+	if err != nil {
+		t.Fatalf("NewPayment: %v", err)
+	}
+	if err := failed.TransitionTo(paymentdomain.StatusProcessing); err != nil {
+		t.Fatalf("TransitionTo PROCESSING: %v", err)
+	}
+	if err := failed.TransitionTo(paymentdomain.StatusFailed); err != nil {
+		t.Fatalf("TransitionTo FAILED: %v", err)
+	}
+	if err := paymentpostgres.New(db).Create(ctx, failed); err != nil {
+		t.Fatalf("seed failed payment: %v", err)
+	}
+
+	depositor := NewDepositor(NewSQLDepositStore(db))
+	_, err = depositor.Deposit(ctx, DepositInput{
+		UserID: userID, WalletID: walletID, Method: "BANK_TRANSFER",
+		Amount: decimal.NewFromInt(25), Currency: "USD", Reference: ref,
+	})
+	if !errors.Is(err, ErrReferenceConflict) {
+		t.Fatalf("reusing a FAILED reference: expected ErrReferenceConflict, got %v", err)
+	}
+	if got := readBalance(t, db, walletID); !got.Equal(decimal.NewFromInt(100)) {
+		t.Fatalf("balance changed on rejected reuse: got %s, want 100", got)
+	}
+
+	// A new request with a new reference succeeds.
+	if _, err := depositor.Deposit(ctx, DepositInput{
+		UserID: userID, WalletID: walletID, Method: "BANK_TRANSFER",
+		Amount: decimal.NewFromInt(25), Currency: "USD", Reference: "IDEM-" + uuid.NewString(),
+	}); err != nil {
+		t.Fatalf("new reference after failure: %v", err)
+	}
+	if got := readBalance(t, db, walletID); !got.Equal(decimal.NewFromInt(125)) {
+		t.Fatalf("balance after new request: got %s, want 125", got)
 	}
 }

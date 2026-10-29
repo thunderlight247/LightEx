@@ -700,10 +700,10 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [ ] Provider callback duplication protection (needs a provider; Phase 5)
 
 ### 4.9 State machine / workflow
-- [ ] Transaction state machine
-- [ ] Payment state machine
-- [ ] Legal state transitions
-- [ ] Failure/cancellation/retry rules
+- [x] Transaction state machine (explicit transition methods in transaction/domain; covered by TestTransactionStateTransitions)
+- [x] Payment state machine (allowedTransitions table in payment/domain; covered by TestPaymentStateMachine_*)
+- [x] Legal state transitions (illegal transitions rejected and status left unchanged; covered by the same tests)
+- [x] Failure/cancellation/retry rules (FAILED is terminal; a retry uses a new request and reference, and a reused FAILED reference is rejected; covered by TestDeposit_FailedPaymentReferenceCannotBeReused)
 
 ## ⏳ Phase 5 — External Payment Infrastructure
 
