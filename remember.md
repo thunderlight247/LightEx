@@ -673,12 +673,12 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [x] Payment state transitions (domain state machine plus service tests confirming persisted transitions and rejected writes)
 
 ### 4.5 Deposit orchestration
-- [ ] Request validation
-- [ ] Payment creation
-- [ ] Transaction creation
-- [ ] Wallet credit
-- [ ] Ledger posting
-- [ ] Atomic completion/failure handling
+- [x] Request validation (payment domain validation and wallet owner/currency checks run before any write)
+- [x] Payment creation (`payment/service/deposit.go`, inside one SQL transaction)
+- [x] Transaction creation (DEPOSIT transaction created in the same SQL transaction)
+- [x] Wallet credit (row locked with `FOR UPDATE`, credited in the same SQL transaction)
+- [x] Ledger posting (CREDIT entry posted in the same SQL transaction)
+- [x] Atomic completion/failure handling (any failure rolls back payment, transaction, balance and ledger; verified against PostgreSQL)
 
 ### 4.6 Withdrawal orchestration
 - [ ] Withdrawal validation

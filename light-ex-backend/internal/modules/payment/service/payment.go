@@ -13,6 +13,7 @@ import (
 
 var (
 	ErrPaymentNotFound = errors.New("payment not found")
+	ErrWalletNotFound  = errors.New("wallet not found")
 )
 
 // Service manages the payment lifecycle. It does not move balances;
