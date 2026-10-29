@@ -651,16 +651,17 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [x] Locked-balance rules
 
 ### 4.2 Transaction engine
-- [ ] Transaction domain
-- [ ] Transaction repository
-- [ ] Transaction lifecycle
-- [ ] Reference handling
-- [ ] Atomic transaction boundaries
+- [x] Transaction domain (`internal/modules/transaction/domain`, unit tests passing)
+- [x] Transaction repository (interface + PostgreSQL impl with `WithTx`/`FindByIDForUpdate`, integration tests passing)
+- [x] Transaction lifecycle (Processing / Completed / Failed / Cancelled transitions)
+- [x] Reference handling (`GenerateReference`)
+- [x] Transaction service (`internal/modules/transaction/service`: create, complete, fail, get)
+- [x] Atomic transaction boundaries (`SQLStore.WithinTx` locks the transaction and wallet rows, commits together, and rolls back on failure; verified against PostgreSQL)
 
 ### 4.3 Ledger
-- [ ] Ledger domain
-- [ ] Ledger repository
-- [ ] Ledger service
+- [x] Ledger domain (`internal/modules/ledger/domain`: CREDIT/DEBIT entries, validation)
+- [x] Ledger repository (interface + PostgreSQL implementation using the caller's SQL transaction)
+- [x] Ledger service (posting done by Transaction service `CompleteTransaction` inside the same SQL transaction; verified rollback against PostgreSQL)
 - [ ] Accounting invariants
 - [ ] Double-entry/entry-balance validation as appropriate to the final model
 
