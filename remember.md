@@ -707,8 +707,8 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 
 ## ⏳ Phase 5 — External Payment Infrastructure
 
-- [ ] Provider abstraction
-- [ ] Mobile Money integration
+- [x] Provider abstraction (payment/provider: Provider interface with Collect/Disburse and request validation; covered by provider_test.go)
+- [ ] Mobile Money integration (first provider type chosen; no vendor selected yet)
 - [ ] Bank transfer integration
 - [ ] Crypto deposit
 - [ ] Crypto withdrawal
