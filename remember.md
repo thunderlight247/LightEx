@@ -662,8 +662,8 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [x] Ledger domain (`internal/modules/ledger/domain`: CREDIT/DEBIT entries, validation)
 - [x] Ledger repository (interface + PostgreSQL implementation using the caller's SQL transaction)
 - [x] Ledger service (posting done by Transaction service `CompleteTransaction` inside the same SQL transaction; verified rollback against PostgreSQL)
-- [ ] Accounting invariants
-- [ ] Double-entry/entry-balance validation as appropriate to the final model
+- [x] Accounting invariants (entry type is derived from transaction type in `EntryTypeForTransaction`; unsupported types cannot post; amount must be > 0; entries are posted only inside the completion SQL transaction)
+- [ ] Double-entry/entry-balance validation as appropriate to the final model (deferred: the current model is one entry per transaction, so this needs the double-entry decision first)
 
 ### 4.4 Payment Engine
 - [ ] Payment domain

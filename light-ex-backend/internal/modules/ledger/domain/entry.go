@@ -17,11 +17,12 @@ const (
 )
 
 var (
-	ErrInvalidTransactionID = errors.New("ledger entry transaction id is required")
-	ErrInvalidWalletID      = errors.New("ledger entry wallet id is required")
-	ErrInvalidEntryType     = errors.New("invalid ledger entry type")
-	ErrInvalidAmount        = errors.New("ledger entry amount must be greater than zero")
-	ErrInvalidCurrency      = errors.New("ledger entry currency is invalid")
+	ErrInvalidTransactionID  = errors.New("ledger entry transaction id is required")
+	ErrInvalidWalletID       = errors.New("ledger entry wallet id is required")
+	ErrInvalidEntryType      = errors.New("invalid ledger entry type")
+	ErrInvalidAmount         = errors.New("ledger entry amount must be greater than zero")
+	ErrInvalidCurrency       = errors.New("ledger entry currency is invalid")
+	ErrNoEntryForTransaction = errors.New("transaction type has no ledger entry rule")
 )
 
 // Entry is an immutable accounting record that a financial transaction posted against a wallet.
@@ -33,6 +34,21 @@ type Entry struct {
 	Amount        decimal.Decimal
 	Currency      string
 	CreatedAt     time.Time
+}
+
+// EntryTypeForTransaction is the single rule that decides which side a
+// transaction posts on. Deposits credit the wallet and withdrawals debit it.
+// Any other transaction type has no ledger rule yet and is rejected, so no
+// entry can be posted with an unknown sign.
+func EntryTypeForTransaction(txType string) (EntryType, error) {
+	switch txType {
+	case "DEPOSIT":
+		return EntryTypeCredit, nil
+	case "WITHDRAWAL":
+		return EntryTypeDebit, nil
+	default:
+		return "", ErrNoEntryForTransaction
+	}
 }
 
 // NewEntry validates and builds a ledger entry.

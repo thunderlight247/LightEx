@@ -21,6 +21,25 @@ func TestNewEntry_Valid(t *testing.T) {
 	}
 }
 
+func TestEntryTypeForTransaction(t *testing.T) {
+	cases := map[string]EntryType{
+		"DEPOSIT":    EntryTypeCredit,
+		"WITHDRAWAL": EntryTypeDebit,
+	}
+	for txType, want := range cases {
+		got, err := EntryTypeForTransaction(txType)
+		if err != nil || got != want {
+			t.Fatalf("%s: want %s, got %s (err %v)", txType, want, got, err)
+		}
+	}
+
+	for _, txType := range []string{"TRANSFER", "EXCHANGE", "ADJUSTMENT", ""} {
+		if _, err := EntryTypeForTransaction(txType); !errors.Is(err, ErrNoEntryForTransaction) {
+			t.Fatalf("%q: expected ErrNoEntryForTransaction, got %v", txType, err)
+		}
+	}
+}
+
 func TestNewEntry_Validation(t *testing.T) {
 	validTx := uuid.New()
 	validWallet := uuid.New()

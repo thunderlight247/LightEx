@@ -127,9 +127,9 @@ func (s *Service) CompleteTransaction(ctx context.Context, txID uuid.UUID) (*dom
 			return err
 		}
 
-		entryType := ledgerdomain.EntryTypeCredit
-		if tx.Type == domain.TransactionTypeWithdrawal {
-			entryType = ledgerdomain.EntryTypeDebit
+		entryType, err := ledgerdomain.EntryTypeForTransaction(string(tx.Type))
+		if err != nil {
+			return err
 		}
 		entry, err := ledgerdomain.NewEntry(tx.ID, wallet.ID, entryType, tx.Amount, tx.Currency)
 		if err != nil {
