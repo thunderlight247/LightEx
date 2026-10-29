@@ -695,9 +695,9 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [ ] Reserve/liquidity handling
 
 ### 4.8 Idempotency
-- [ ] Idempotency strategy
-- [ ] Duplicate request protection
-- [ ] Provider callback duplication protection
+- [x] Idempotency strategy
+- [x] Duplicate request protection
+- [ ] Provider callback duplication protection (needs a provider; Phase 5)
 
 ### 4.9 State machine / workflow
 - [ ] Transaction state machine

@@ -46,6 +46,13 @@ func (w *Withdrawer) Withdraw(ctx context.Context, in WithdrawalInput) (*Withdra
 
 	var result *WithdrawalResult
 	err = w.store.WithinDepositTx(ctx, func(r DepositRepos) error {
+		if replay, err := replayExisting(ctx, r, p); err != nil {
+			return err
+		} else if replay != nil {
+			result = replay
+			return nil
+		}
+
 		wallet, err := r.Wallets.FindByIDForUpdate(ctx, in.WalletID)
 		if err != nil {
 			return mapWalletErr(err)
@@ -72,7 +79,7 @@ func (w *Withdrawer) Withdraw(ctx context.Context, in WithdrawalInput) (*Withdra
 			txdomain.TransactionTypeWithdrawal,
 			p.Amount,
 			p.Currency,
-			"",
+			p.Reference,
 			p.Description,
 			map[string]any{"payment_id": p.ID.String()},
 		)

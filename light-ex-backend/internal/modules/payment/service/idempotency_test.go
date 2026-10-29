@@ -1,0 +1,68 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
+)
+
+func TestDeposit_RetrySameReferenceReturnsOriginalWithoutSecondCredit(t *testing.T) {
+	db := getDepositTestDB(t)
+	userID, walletID := seedUserWallet(t, db, "100")
+	depositor := NewDepositor(NewSQLDepositStore(db))
+	in := DepositInput{
+		UserID:    userID,
+		WalletID:  walletID,
+		Method:    "BANK_TRANSFER",
+		Amount:    decimal.NewFromInt(25),
+		Currency:  "USD",
+		Reference: "IDEM-" + uuid.NewString(),
+	}
+
+	first, err := depositor.Deposit(context.Background(), in)
+	if err != nil {
+		t.Fatalf("first Deposit: %v", err)
+	}
+	second, err := depositor.Deposit(context.Background(), in)
+	if err != nil {
+		t.Fatalf("retry Deposit: %v", err)
+	}
+
+	if second.Payment.ID != first.Payment.ID || second.Transaction.ID != first.Transaction.ID {
+		t.Fatalf("retry returned different records: payment %s vs %s", second.Payment.ID, first.Payment.ID)
+	}
+	if got := readBalance(t, db, walletID); !got.Equal(decimal.NewFromInt(125)) {
+		t.Fatalf("balance after retry: got %s, want 125 (credited once)", got)
+	}
+	if n := countRows(t, db, `SELECT COUNT(*) FROM ledger_entries WHERE wallet_id = $1`, walletID); n != 1 {
+		t.Fatalf("expected 1 ledger entry after retry, got %d", n)
+	}
+}
+
+func TestDeposit_ReusedReferenceDifferentAmountIsConflict(t *testing.T) {
+	db := getDepositTestDB(t)
+	userID, walletID := seedUserWallet(t, db, "100")
+	depositor := NewDepositor(NewSQLDepositStore(db))
+	ref := "IDEM-" + uuid.NewString()
+
+	if _, err := depositor.Deposit(context.Background(), DepositInput{
+		UserID: userID, WalletID: walletID, Method: "BANK_TRANSFER",
+		Amount: decimal.NewFromInt(25), Currency: "USD", Reference: ref,
+	}); err != nil {
+		t.Fatalf("first Deposit: %v", err)
+	}
+
+	_, err := depositor.Deposit(context.Background(), DepositInput{
+		UserID: userID, WalletID: walletID, Method: "BANK_TRANSFER",
+		Amount: decimal.NewFromInt(50), Currency: "USD", Reference: ref,
+	})
+	if !errors.Is(err, ErrReferenceConflict) {
+		t.Fatalf("expected ErrReferenceConflict, got %v", err)
+	}
+	if got := readBalance(t, db, walletID); !got.Equal(decimal.NewFromInt(125)) {
+		t.Fatalf("balance changed on conflict: got %s, want 125", got)
+	}
+}

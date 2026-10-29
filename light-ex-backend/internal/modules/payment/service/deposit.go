@@ -26,7 +26,37 @@ var (
 	ErrWalletOwnerMismatch = errors.New("wallet does not belong to the user")
 	// ErrDepositCurrencyMismatch is returned when the deposit currency differs from the wallet currency.
 	ErrDepositCurrencyMismatch = errors.New("deposit currency does not match wallet currency")
+	// ErrReferenceConflict is returned when a reused reference points at a different request.
+	ErrReferenceConflict = errors.New("payment reference already used for a different request")
 )
+
+// replayExisting checks whether a payment with the same reference was already completed for
+// the same request. If so it returns the original payment and transaction so a retry does not
+// move money a second time. A reference reused for a different request is a conflict.
+// It returns (nil, nil) when the reference is new.
+func replayExisting(ctx context.Context, r DepositRepos, p *paymentdomain.Payment) (*DepositResult, error) {
+	prev, err := r.Payments.FindByReference(ctx, p.Reference)
+	if errors.Is(err, paymentpostgres.ErrPaymentNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if prev.UserID != p.UserID || prev.WalletID != p.WalletID ||
+		prev.Direction != p.Direction || !prev.Amount.Equal(p.Amount) || prev.Currency != p.Currency {
+		return nil, ErrReferenceConflict
+	}
+	if prev.Status != paymentdomain.StatusCompleted {
+		return nil, ErrReferenceConflict
+	}
+
+	tx, err := r.Transactions.FindByReference(ctx, prev.Reference)
+	if err != nil {
+		return nil, err
+	}
+	return &DepositResult{Payment: prev, Transaction: tx}, nil
+}
 
 // DepositInput describes a deposit request.
 type DepositInput struct {
@@ -92,6 +122,13 @@ func (d *Depositor) Deposit(ctx context.Context, in DepositInput) (*DepositResul
 
 	var result *DepositResult
 	err = d.store.WithinDepositTx(ctx, func(r DepositRepos) error {
+		if replay, err := replayExisting(ctx, r, p); err != nil {
+			return err
+		} else if replay != nil {
+			result = replay
+			return nil
+		}
+
 		wallet, err := r.Wallets.FindByIDForUpdate(ctx, in.WalletID)
 		if err != nil {
 			return mapWalletErr(err)
@@ -118,7 +155,7 @@ func (d *Depositor) Deposit(ctx context.Context, in DepositInput) (*DepositResul
 			txdomain.TransactionTypeDeposit,
 			p.Amount,
 			p.Currency,
-			"",
+			p.Reference,
 			p.Description,
 			map[string]any{"payment_id": p.ID.String()},
 		)
