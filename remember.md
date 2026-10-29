@@ -580,21 +580,26 @@ Mobile Money, banks, crypto networks, webhooks, and retries belong in the extern
 
 ## 🔄 CURRENT MILESTONE
 
-**Rebuild the Transaction & Ledger modules and establish atomic financial operations (Phase 4).**
+**Phase 5 — External Payment Infrastructure.**
 
-Phase 3 (Wallet Rebuild) is completed and verified with domain, repository, service, HTTP, and PostgreSQL integration tests.
+Phase 4 (Core Financial Engine) was completed and verified:
+- Transaction domain, repository, and service with atomic boundaries.
+- Ledger double-entry accounting and invariant checks.
+- Payment domain, repository, and service lifecycle.
+- Deposit orchestration, withdrawal orchestration, and atomic internal settlement.
+- Idempotency and transaction state machines.
 
-The next implementation milestone is:
+In Phase 5, the following external payment integrations have been completed:
+- Generic `provider.Provider` abstraction (`Collect`, `Disburse`, request validation).
+- MTN Mobile Money integration (`requesttopay`, `transfer`, OAuth2 token caching, status lookups, and webhook parsing).
+- Bank transfer integration (Account validation, deposit reference allocation, disburse, status checks).
+- Crypto integration (Address validation for EVM, TRON, BTC; deposit monitoring and withdrawal dispatch).
+- Network retry mechanism (Exponential backoff with jitter and transient network error filtering).
+- Automated payment status reconciliation worker.
 
-```text
-Phase 4.2 — Transaction engine (Domain, Repository, Service)
-Phase 4.3 — Ledger (Domain, Repository, Service)
-Phase 4.4 — Payment Engine
-Phase 4.5 — Deposit orchestration
-Phase 4.6 — Withdrawal orchestration
-```
-
-Proceed into the financial transaction/ledger coordination, then Payment Engine orchestration.
+Remaining in Phase 5:
+- Liquidity provider integration (liquidity sourcing and rate feeds).
+- External provider webhook deduplication protection.
 
 ---
 
@@ -717,6 +722,7 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [x] Retry mechanism (payment/provider/retry: Exponential backoff with jitter and network transient error classification; covered by retry_test.go)
 - [x] Reconciliation (payment/reconciliation: Background worker finding stale processing payments and atomically settling or failing with balance unlock; covered by worker_test.go)
 - [ ] Liquidity provider integration
+- [ ] Provider callback deduplication protection
 
 ## ⏳ Phase 6 — KYC / Risk / Limits
 
@@ -904,19 +910,18 @@ The migration naming is now standardized through `000005`; the previous typo `00
 
 # 16. Immediate Next Actions
 
-### 🔄 Now (Phase 4 — Core Financial Engine)
+### 🔄 Now (Remaining in Phase 5 — External Payment Infrastructure)
 
-1. Rebuild Transaction domain (`internal/modules/transaction/domain`).
-2. Rebuild Transaction repository interface and PostgreSQL implementation.
-3. Rebuild Transaction service and state machine.
-4. Rebuild Ledger domain, repository, and double-entry/accounting service.
-5. Establish atomic financial-operation coordination across Wallet, Transaction, and Ledger.
-6. Rebuild Payment domain/repository/service/application.
-7. Implement deposit orchestration.
-8. Implement withdrawal orchestration.
-9. Implement treasury/internal settlement.
-10. Implement idempotency and state machines.
-11. Only then begin external provider integrations (Phase 5).
+1. Implement Liquidity Provider abstraction and integration (`internal/modules/payment/provider/liquidity`).
+2. Add webhook callback deduplication protection.
+3. Wire payment providers and webhooks into HTTP routes.
+
+### ⏳ Next (Phase 6 — KYC / Risk / Limits)
+
+1. KYC submission and verification workflow.
+2. User tier eligibility states.
+3. Daily/monthly deposit and withdrawal limits.
+4. Risk controls and compliance restrictions.
 
 ---
 
@@ -931,24 +936,30 @@ PostgreSQL                    ✅
 Database schema                ✅
 Migration chain 1–5           ✅
 Git recovery checkpoint       ✅
-Wallet Go module               ✅ Rebuilt & Verified (Phase 3 Complete)
+Wallet Go module               ✅ (Phase 3 Complete)
+Transaction Go module          ✅ (Phase 4 Complete)
+Ledger Go module               ✅ (Phase 4 Complete)
+Payment Go module               ✅ (Phase 4 Complete)
+Deposit orchestration          ✅ (Phase 4 Complete)
+Withdrawal orchestration       ✅ (Phase 4 Complete)
+Internal settlement            ✅ (Phase 4 Complete)
+Idempotency                    ✅ (Phase 4 Complete)
+State machines                 ✅ (Phase 4 Complete)
+Mobile Money provider (MTN)    ✅ (Phase 5)
+Bank transfer provider         ✅ (Phase 5)
+Crypto provider (Deposit/Wth)  ✅ (Phase 5)
+Retry mechanism (Backoff)      ✅ (Phase 5)
+Reconciliation worker          ✅ (Phase 5)
 
-Transaction Go module          ❌ Rebuild needed (Phase 4)
-Ledger Go module               ❌ Rebuild needed (Phase 4)
-Payment Go module               ❌ Rebuild needed (Phase 4)
-Deposit orchestration          ⏳
-Withdrawal orchestration       ⏳
-Treasury                        ⏳
-Idempotency                     ⏳
-State machines                 ⏳
-External providers             ⏳
-Exchange engine                ⏳
-Flutter client                 ⏳
-Production hardening           ⏳
+Liquidity provider             ⏳ (Remaining in Phase 5)
+KYC / Limits / Risk            ⏳ (Phase 6)
+Exchange engine                ⏳ (Phase 7)
+Flutter client                 ⏳ (Phase 8)
+Production hardening           ⏳ (Phase 9)
 ```
 
 ### Current milestone
 
-> **Phase 4 — Core Financial Engine → Rebuild Transaction and Ledger modules, then establish atomic financial coordination.**
+> **Phase 5 — External Payment Infrastructure → Liquidity provider integration & webhook callback deduplication.**
 
 This file should be updated whenever a milestone is completed, an architecture decision changes, a recovery event occurs, or the project's current state materially changes.
