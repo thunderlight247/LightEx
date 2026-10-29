@@ -669,8 +669,8 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [x] Payment domain
 - [x] Payment repository
 - [x] Payment service
-- [ ] Application layer
-- [ ] Payment state transitions
+- [x] Application layer (`internal/modules/payment/module.go` wires repository and service from `*sql.DB`)
+- [x] Payment state transitions (domain state machine plus service tests confirming persisted transitions and rejected writes)
 
 ### 4.5 Deposit orchestration
 - [ ] Request validation
