@@ -666,9 +666,9 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [ ] Double-entry/entry-balance validation as appropriate to the final model (deferred: the current model is one entry per transaction, so this needs the double-entry decision first)
 
 ### 4.4 Payment Engine
-- [ ] Payment domain
-- [ ] Payment repository
-- [ ] Payment service
+- [x] Payment domain
+- [x] Payment repository
+- [x] Payment service
 - [ ] Application layer
 - [ ] Payment state transitions
 
