@@ -681,13 +681,13 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [x] Atomic completion/failure handling (any failure rolls back payment, transaction, balance and ledger; verified against PostgreSQL)
 
 ### 4.6 Withdrawal orchestration
-- [ ] Withdrawal validation
-- [ ] Balance availability checks
-- [ ] Funds locking
-- [ ] Transaction creation
+- [x] Withdrawal validation (payment domain validation and wallet owner/currency checks run before any write)
+- [x] Balance availability checks (`Wallet.LockFunds` rejects insufficient funds before anything is written)
+- [x] Funds locking (funds are reserved under a row lock and settled with `DebitLocked`, in one SQL transaction)
+- [x] Transaction creation (WITHDRAWAL transaction created in the same SQL transaction)
 - [ ] Provider handoff later
-- [ ] Ledger posting
-- [ ] Completion/failure/cancellation handling
+- [x] Ledger posting (DEBIT entry posted in the same SQL transaction)
+- [x] Completion/failure/cancellation handling (any failure rolls back everything; insufficient funds and mid-unit failure are verified against PostgreSQL. Cancellation is not part of this unit because no payment is left pending)
 
 ### 4.7 Treasury/internal settlement
 - [ ] Treasury domain/service
