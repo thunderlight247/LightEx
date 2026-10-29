@@ -705,16 +705,16 @@ Proceed into the financial transaction/ledger coordination, then Payment Engine 
 - [x] Legal state transitions (illegal transitions rejected and status left unchanged; covered by the same tests)
 - [x] Failure/cancellation/retry rules (FAILED is terminal; a retry uses a new request and reference, and a reused FAILED reference is rejected; covered by TestDeposit_FailedPaymentReferenceCannotBeReused)
 
-## ⏳ Phase 5 — External Payment Infrastructure
+## 🔄 Phase 5 — External Payment Infrastructure
 
 - [x] Provider abstraction (payment/provider: Provider interface with Collect/Disburse and request validation; covered by provider_test.go)
-- [ ] Mobile Money integration (first provider type chosen; no vendor selected yet)
+- [x] Mobile Money integration (MTN MoMo client implementing `provider.Provider` with `Collect` via `requesttopay`, `Disburse` via `transfer`, OAuth2 token caching, and transaction status polling; covered by client_test.go, token_test.go, integration_test.go)
+- [x] Webhooks (MTN MoMo webhook callback parser and Gin handler; covered by webhook_test.go)
+- [x] Callback processing (CallbackNotification mapping to generic provider status and processor hook)
 - [ ] Bank transfer integration
 - [ ] Crypto deposit
 - [ ] Crypto withdrawal
 - [ ] Liquidity provider integration
-- [ ] Webhooks
-- [ ] Callback processing
 - [ ] Retry mechanism
 - [ ] Reconciliation
 
