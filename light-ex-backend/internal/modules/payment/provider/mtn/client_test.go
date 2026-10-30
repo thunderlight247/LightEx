@@ -3,11 +3,17 @@ package mtn
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/shopspring/decimal"
+
+	paymentdomain "github.com/light-group/light-ex-backend/internal/modules/payment/domain"
 
 	"github.com/light-group/light-ex-backend/internal/modules/payment/provider"
 )
@@ -199,6 +205,130 @@ func TestClient_CheckCollectionStatus(t *testing.T) {
 	res3, err := client.CheckCollectionStatus(ctx, "ref-pending")
 	if err != nil || res3.Status != provider.StatusPending {
 		t.Errorf("expected StatusPending, got %v, err %v", res3.Status, err)
+	}
+}
+
+type callbackTestFinder struct {
+	payment *paymentdomain.Payment
+	err     error
+}
+
+func (f callbackTestFinder) FindByReference(_ context.Context, ref string) (*paymentdomain.Payment, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	if f.payment == nil || f.payment.Reference != ref {
+		return nil, errors.New("not found")
+	}
+	return f.payment, nil
+}
+
+func TestVerifyCallbackWithMTNStatusLookup(t *testing.T) {
+	for _, direction := range []paymentdomain.Direction{paymentdomain.DirectionDeposit, paymentdomain.DirectionWithdrawal} {
+		for _, status := range []string{MTNStatusPending, MTNStatusSuccessful, MTNStatusFailed} {
+			t.Run(string(direction)+"/"+status, func(t *testing.T) {
+				ref := uuid.NewString()
+				payment := &paymentdomain.Payment{ID: uuid.New(), Reference: "PAY-123", ProviderReference: ref, Method: ProviderName, Direction: direction, Status: paymentdomain.StatusProcessing, Amount: decimal.RequireFromString("50.00"), Currency: "GHS"}
+				callback := &CallbackNotification{ExternalID: payment.Reference, FinancialTransactionID: "FIN-1", Amount: "50.0", Currency: "GHS", Status: status}
+				remote := TransactionStatusResponse{ExternalID: payment.Reference, FinancialTransactionID: "FIN-1", Amount: "50.00", Currency: "GHS", Status: status}
+				var httpStatus = http.StatusOK
+				var expectedPath, tokenPath, subscription string
+				if direction == paymentdomain.DirectionDeposit {
+					expectedPath = "/collection/v1_0/requesttopay/" + ref
+					tokenPath = "/collection/token/"
+					subscription = "coll-sub-key"
+				} else {
+					expectedPath = "/disbursement/v1_0/transfer/" + ref
+					tokenPath = "/disbursement/token/"
+					subscription = "disb-sub-key"
+				}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch r.URL.Path {
+					case tokenPath:
+						_ = json.NewEncoder(w).Encode(tokenResponse{AccessToken: "token", ExpiresIn: 3600})
+					case expectedPath:
+						if r.Method != http.MethodGet || r.Header.Get("Authorization") != "Bearer token" || r.Header.Get("Ocp-Apim-Subscription-Key") != subscription {
+							t.Errorf("incorrect authenticated status request")
+						}
+						w.WriteHeader(httpStatus)
+						_ = json.NewEncoder(w).Encode(remote)
+					default:
+						t.Errorf("unexpected path: %s", r.URL.Path)
+						http.NotFound(w, r)
+					}
+				}))
+				defer server.Close()
+				client := NewClient(dummyConfig(server.URL, server.Client()))
+				verify := func() (VerifiedCallback, error) {
+					return VerifyCallback(context.Background(), callbackTestFinder{payment: payment}, client, callback)
+				}
+				verified, err := verify()
+				if err != nil || verified.PaymentID != payment.ID || verified.ProviderReference != ref || verified.Status != MapMTNStatus(status) {
+					t.Fatalf("verification: %+v %v", verified, err)
+				}
+				if payment.Status != paymentdomain.StatusProcessing {
+					t.Fatal("verification modified payment")
+				}
+				tests := []struct {
+					name   string
+					change func()
+					reset  func()
+				}{
+					{"callback amount", func() { callback.Amount = "51" }, func() { callback.Amount = "50.0" }},
+					{"callback currency", func() { callback.Currency = "USD" }, func() { callback.Currency = "GHS" }},
+					{"callback status", func() { callback.Status = "UNKNOWN" }, func() { callback.Status = status }},
+					{"callback transaction id", func() { callback.FinancialTransactionID = "wrong" }, func() { callback.FinancialTransactionID = "FIN-1" }},
+					{"provider amount", func() { remote.Amount = "51" }, func() { remote.Amount = "50.00" }},
+					{"provider currency", func() { remote.Currency = "USD" }, func() { remote.Currency = "GHS" }},
+					{"provider reference", func() { remote.ExternalID = "other" }, func() { remote.ExternalID = payment.Reference }},
+					{"provider unknown status", func() { remote.Status = "UNKNOWN" }, func() { remote.Status = status }},
+					{"provider mismatched status", func() {
+						if status == MTNStatusSuccessful {
+							remote.Status = MTNStatusFailed
+						} else {
+							remote.Status = MTNStatusSuccessful
+						}
+					}, func() { remote.Status = status }},
+					{"missing provider reference", func() { payment.ProviderReference = "" }, func() { payment.ProviderReference = ref }},
+					{"wrong payment method", func() { payment.Method = "BANK" }, func() { payment.Method = ProviderName }},
+					{"terminal payment", func() { payment.Status = paymentdomain.StatusCompleted }, func() { payment.Status = paymentdomain.StatusProcessing }},
+				}
+				for _, tt := range tests {
+					t.Run(tt.name, func(t *testing.T) {
+						tt.change()
+						defer tt.reset()
+						if _, err := verify(); !errors.Is(err, ErrCallbackVerification) {
+							t.Fatalf("expected verification error, got %v", err)
+						}
+					})
+				}
+				httpStatus = http.StatusInternalServerError
+				if _, err := verify(); !errors.Is(err, ErrUnexpectedResponseStatus) {
+					t.Fatalf("provider error: %v", err)
+				}
+			})
+		}
+	}
+}
+
+func TestLookupTransactionRejectsInvalidReferenceAndProviderResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/token/") {
+			_, _ = fmt.Fprint(w, `{"access_token":"token","expires_in":3600}`)
+			return
+		}
+		_, _ = fmt.Fprint(w, strings.Repeat("x", 65537))
+	}))
+	defer server.Close()
+	client := NewClient(dummyConfig(server.URL, server.Client()))
+	if _, err := client.LookupTransaction(context.Background(), "DEPOSIT", "../../other"); err == nil {
+		t.Fatal("invalid reference accepted")
+	}
+	if _, err := client.LookupTransaction(context.Background(), "OTHER", uuid.NewString()); err == nil {
+		t.Fatal("invalid direction accepted")
+	}
+	if _, err := client.LookupTransaction(context.Background(), "DEPOSIT", uuid.NewString()); err == nil {
+		t.Fatal("oversized response accepted")
 	}
 }
 

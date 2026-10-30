@@ -5,6 +5,8 @@ import (
 
 	auth "github.com/light-group/light-ex-backend/internal/modules/auth"
 	liquidity "github.com/light-group/light-ex-backend/internal/modules/liquidity"
+	payment "github.com/light-group/light-ex-backend/internal/modules/payment"
+	"github.com/light-group/light-ex-backend/internal/modules/payment/provider/mtn"
 	wallet "github.com/light-group/light-ex-backend/internal/modules/wallet"
 	"github.com/light-group/light-ex-backend/internal/platform/bootstrap"
 	"github.com/light-group/light-ex-backend/internal/platform/middleware"
@@ -49,5 +51,20 @@ func RegisterRoutes(
 	// Simulations are intentionally unavailable outside development.
 	if app.Config.App.Env == "development" {
 		liquidity.New().RegisterRoutes(v1, authMiddleware)
+	}
+
+	// MTN MoMo provider callbacks. Intentionally unauthenticated: caller
+	// authenticity is established by SettlementProcessor, which validates the
+	// callback against the stored payment and an authenticated MTN status
+	// lookup before anything is written.
+	// The route is mounted only when provider credentials are configured for at
+	// least one product, so production never exposes it without a real provider.
+	mtnCfg := mtn.LoadConfigFromEnv()
+	if mtnCfg.Collection.IsConfigured() || mtnCfg.Disbursement.IsConfigured() {
+		paymentModule := payment.New(app.Database.SQL())
+		client := mtn.NewClient(mtnCfg)
+		v1.POST("/payments/webhooks/mtn", mtn.WebhookHandler(
+			mtn.SettlementProcessor(app.Database.SQL(), paymentModule.Repository(), client),
+		))
 	}
 }

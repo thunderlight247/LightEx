@@ -339,6 +339,62 @@ func (c *Client) CheckDisbursementStatus(ctx context.Context, referenceID string
 	}, nil
 }
 
+// LookupTransaction retrieves the full provider record for verification using the
+// reference saved when the request was initiated. It never uses callback data as
+// the provider reference. Unknown statuses must be rejected by the caller.
+func (c *Client) LookupTransaction(ctx context.Context, direction string, referenceID string) (TransactionStatusResponse, error) {
+	id, err := uuid.Parse(referenceID)
+	if err != nil || id == uuid.Nil {
+		return TransactionStatusResponse{}, errors.New("invalid mtn provider reference")
+	}
+	var product, path string
+	var tokens *TokenManager
+	var credentials SubscriptionConfig
+	switch direction {
+	case "DEPOSIT":
+		product, path, tokens, credentials = "collection", "requesttopay", c.collectionTokens, c.cfg.Collection
+	case "WITHDRAWAL":
+		product, path, tokens, credentials = "disbursement", "transfer", c.disburseTokens, c.cfg.Disbursement
+	default:
+		return TransactionStatusResponse{}, errors.New("invalid mtn payment direction")
+	}
+	token, err := tokens.Token(ctx)
+	if err != nil {
+		return TransactionStatusResponse{}, fmt.Errorf("mtn status token: %w", err)
+	}
+	url := fmt.Sprintf("%s/%s/v1_0/%s/%s", c.cfg.BaseURL, product, path, id.String())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return TransactionStatusResponse{}, fmt.Errorf("create mtn status request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Target-Environment", c.cfg.Environment)
+	req.Header.Set("Ocp-Apim-Subscription-Key", credentials.SubscriptionKey)
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return TransactionStatusResponse{}, fmt.Errorf("mtn status request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return TransactionStatusResponse{}, ErrStatusNotFound
+	}
+	if resp.StatusCode != http.StatusOK {
+		return TransactionStatusResponse{}, fmt.Errorf("%w: status %d", ErrUnexpectedResponseStatus, resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 65537))
+	if err != nil {
+		return TransactionStatusResponse{}, fmt.Errorf("read mtn status: %w", err)
+	}
+	if len(body) > 65536 {
+		return TransactionStatusResponse{}, errors.New("mtn status response too large")
+	}
+	var result TransactionStatusResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return TransactionStatusResponse{}, fmt.Errorf("decode mtn status response: %w", err)
+	}
+	return result, nil
+}
+
 // MapMTNStatus maps MTN's status string to provider.Status.
 func MapMTNStatus(mtnStatus string) provider.Status {
 	switch strings.ToUpper(strings.TrimSpace(mtnStatus)) {

@@ -2,7 +2,7 @@
 
 > **Purpose:** This file is the persistent project handoff document for LightEx. A developer, AI coding assistant, or future version of the project should be able to read this file and understand what LightEx is, how the backend is structured, what has been completed, what was lost during the OS migration, what has been restored, exactly where development currently stands, and what remains to be built.
 >
-> **Last updated:** 2026-10-05
+> **Last updated:** 2026-10-30
 > **Current environment:** Linux, Docker, PostgreSQL 16, Go
 > **Current backend path used in the latest session:** `/mnt/grace/LightEx/light-ex-backend`
 
@@ -597,7 +597,7 @@ Phase 5 implementation status:
 
 Remaining in Phase 5:
 - Real liquidity provider integration (liquidity sourcing and rate feeds). A development-only simulator now exists; its invented rates and orders are not real liquidity.
-- External provider webhook deduplication protection: PostgreSQL-backed MTN deduplication primitive exists, but callback authentication, settlement processing, and route wiring remain outstanding.
+- External provider webhook processing: PostgreSQL-backed MTN deduplication, read-only callback verification, and verified settlement are wired (`mtn.SettlementProcessor` + `payment/service.SettleCallback`), and the verification-first settlement route is mounted at `POST /api/v1/payments/webhooks/mtn` via `cmd/api/routes.go` — but only when MTN credentials are configured (`MTN_COLLECTION_*` or `MTN_DISBURSEMENT_*`), so it stays absent without a real provider. Outstanding: asynchronous payment initiation (nothing calls `Collect`/`Disburse` in production yet), explicit callback sender authentication (authenticity currently rests entirely on the authenticated provider status lookup), out-of-order status policy beyond the verifier's PROCESSING gate, and live sandbox compatibility. No funds can move yet because no production code initiates MTN payments.
 
 ---
 
@@ -730,7 +730,7 @@ The service and simulated provider store quotes, orders and idempotency keys in 
 - [x] Retry mechanism (payment/provider/retry: Exponential backoff with jitter and network transient error classification; covered by retry_test.go)
 - [x] Reconciliation (payment/reconciliation: Background worker finding stale processing payments and atomically settling or failing with balance unlock; covered by worker_test.go)
 - [ ] Real liquidity provider integration (a standalone simulated liquidity module is implemented for development; no real provider, funds, rates, or settlement)
-- [ ] Provider callback deduplication protection (MTN PostgreSQL transactional deduplication primitive added with migration 000006; not yet wired to authenticated callback settlement or routes)
+- [x] Provider callback processing (mtn.SettlementProcessor: verify callback against the stored payment and an authenticated MTN status lookup strictly before any write, then inside one transaction deduplicate the event and apply settlement via service.SettleCallback, which re-locks the payment row, revalidates facts, and settles deposit credit / withdrawal DebitLocked / failure UnlockFunds with ledger posting, mirroring the reconciliation worker. Duplicate redeliveries of an already-processed payload hash short-circuit to a no-op; conflicting payloads and unknown references are rejected before any write; pending callbacks record the dedup event but move no balances. Covered by webhook_test.go settlement tests against PostgreSQL with a mock MTN server. Remaining: callback sender authentication is not separately implemented, asynchronous payment initiation does not exist yet, and live sandbox compatibility is unverified.)
 
 ## ⏳ Phase 6 — KYC / Risk / Limits
 
@@ -921,8 +921,8 @@ The migration naming is now standardized through `000005`; the previous typo `00
 ### 🔄 Now (Remaining in Phase 5 — External Payment Infrastructure)
 
 1. Develop and evaluate simulated liquidity. Real provider onboarding is deferred; HoneyCoin is a candidate only, not an approved integration. Verify its rate endpoint and response schema and sandbox market availability before implementing or using real financial rates.
-2. Wire the MTN PostgreSQL callback deduplication primitive into authenticated callback processing, with settlement in the same transaction; apply migration 000006 before use.
-3. Wire payment providers and webhooks into HTTP routes only after callback authentication and settlement processing are in place.
+2. Design asynchronous payment initiation (deposit request → PENDING payment → provider Collect → PROCESSING + provider_reference saved) so payments exist for the verified settlement pipeline to settle. The settlement pipeline itself is done: verify-before-writes, dedup + settlement in one transaction with re-lock, migration 000006 applied before use, and PostgreSQL/mock-server tests covering success, pending, failure, withdrawal unlock, mismatch, forged-later-success rejection, and concurrent redelivery. The settlement route is wired and credential-gated.
+3. Decide remaining callback-sender authentication (raw-body signature or allowlist) and out-of-order status policy; verify MTN sandbox compatibility, then exercise the full live path once asynchronous initiation exists.
 
 ### ⏳ Next (Phase 6 — KYC / Risk / Limits)
 
