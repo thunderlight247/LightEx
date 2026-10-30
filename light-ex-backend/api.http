@@ -45,3 +45,55 @@ Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
 ### Get Wallet By ID
 GET http://localhost:8080/api/v1/wallets/PASTE_WALLET_ID_HERE
 Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+
+###
+
+# Payment flows (payment routes only exist when MTN provider credentials are
+# configured; deposits require collection credentials, withdrawals require
+# disbursement credentials). Copy the wallet `id` from Get My Wallet above,
+# and the access token from the Login response.
+
+### Initiate Deposit (collect from the customer's mobile wallet)
+POST http://localhost:8080/api/v1/payments/deposits
+Content-Type: application/json
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+
+{
+    "wallet_id": "PASTE_WALLET_ID_HERE",
+    "amount": "25.50",
+    "currency": "USD",
+    "phone": "+233241234567",
+    "description": "Deposit into LightEx"
+}
+
+###
+
+### Initiate Deposit with idempotent reference (replaying the same reference
+### returns the original result instead of a second payment)
+POST http://localhost:8080/api/v1/payments/deposits
+Content-Type: application/json
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+
+{
+    "wallet_id": "PASTE_WALLET_ID_HERE",
+    "amount": "25.50",
+    "currency": "USD",
+    "phone": "+233241234567",
+    "reference": "PAY-MY-TEST-1",
+    "description": "Deposit into LightEx"
+}
+
+###
+
+### Initiate Withdrawal (reserves the funds, then disburses to the customer)
+POST http://localhost:8080/api/v1/payments/withdrawals
+Content-Type: application/json
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+
+{
+    "wallet_id": "PASTE_WALLET_ID_HERE",
+    "amount": "10.00",
+    "currency": "USD",
+    "phone": "+233241234567",
+    "description": "Withdrawal from LightEx"
+}

@@ -53,16 +53,27 @@ func RegisterRoutes(
 		liquidity.New().RegisterRoutes(v1, authMiddleware)
 	}
 
-	// MTN MoMo provider callbacks. Intentionally unauthenticated: caller
+	// MTN MoMo provider. Intentionally unauthenticated callback route: caller
 	// authenticity is established by SettlementProcessor, which validates the
 	// callback against the stored payment and an authenticated MTN status
-	// lookup before anything is written.
-	// The route is mounted only when provider credentials are configured for at
-	// least one product, so production never exposes it without a real provider.
+	// lookup before anything is written. Initiation routes require the standard
+	// JWT auth middleware. Routes are mounted only when provider credentials are
+	// configured for the corresponding product, so production never exposes an
+	// endpoint it cannot service.
 	mtnCfg := mtn.LoadConfigFromEnv()
 	if mtnCfg.Collection.IsConfigured() || mtnCfg.Disbursement.IsConfigured() {
-		paymentModule := payment.New(app.Database.SQL())
 		client := mtn.NewClient(mtnCfg)
+
+		paymentModule := payment.New(app.Database.SQL()).WithInitiator(client)
+
+		if mtnCfg.Collection.IsConfigured() {
+			paymentModule.RegisterDepositRoutes(v1, authMiddleware)
+		}
+
+		if mtnCfg.Disbursement.IsConfigured() {
+			paymentModule.RegisterWithdrawalRoutes(v1, authMiddleware)
+		}
+
 		v1.POST("/payments/webhooks/mtn", mtn.WebhookHandler(
 			mtn.SettlementProcessor(app.Database.SQL(), paymentModule.Repository(), client),
 		))
