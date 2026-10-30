@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,8 +19,10 @@ import (
 
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/shopspring/decimal"
 
 	paymentpostgres "github.com/light-group/light-ex-backend/internal/modules/payment/repository/postgres"
+	paymentservice "github.com/light-group/light-ex-backend/internal/modules/payment/service"
 
 	"github.com/gin-gonic/gin"
 
@@ -287,6 +291,7 @@ func TestWebhookHandler_Integration(t *testing.T) {
 // transactions and ledger migrations applied, plus one PROCESSING payment.
 type settlementFixture struct {
 	db       *sql.DB
+	user     uuid.UUID
 	payment  uuid.UUID
 	wallet   uuid.UUID
 	provider string // provider_reference stored on the payment
@@ -353,7 +358,7 @@ func newSettlementFixture(t *testing.T, ctx context.Context, dsn string, deposit
 	if _, err := db.ExecContext(ctx, `INSERT INTO payments (id,user_id,wallet_id,direction,method,amount,currency,status,reference,provider_reference,created_at,updated_at) VALUES ($1,$2,$3,$4,'MTN_MOMO',50,'GHS','PROCESSING','PAY-SETTLE',$5,now(),now())`, payment, user, wallet, direction, providerRef); err != nil {
 		t.Fatal(err)
 	}
-	return &settlementFixture{db: db, payment: payment, wallet: wallet, provider: providerRef}
+	return &settlementFixture{db: db, user: user, payment: payment, wallet: wallet, provider: providerRef}
 }
 
 // mtnStatusServer serves token + provider status for both products under the
@@ -508,6 +513,200 @@ func TestSettlementProcessor_DepositFailed_RejectedNoCredit(t *testing.T) {
 	}
 	if entries != 0 {
 		t.Fatalf("failed deposit produced %d ledger entries", entries)
+	}
+}
+
+// TestInitiateAndSettle_Postgres runs the full asynchronous deposit path with
+// the real MTN client against a mock MTN server: initiation records PROCESSING
+// with the provider reference, and the webhook then settles the callback.
+func TestInitiateAndSettle_Postgres(t *testing.T) {
+	dsn := os.Getenv("LIGHTEX_CALLBACK_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set LIGHTEX_CALLBACK_TEST_DATABASE_URL for PostgreSQL integration")
+	}
+	ctx := context.Background()
+	fx := newSettlementFixture(t, ctx, dsn, true)
+
+	var mu sync.Mutex
+	record := map[string]string{} // externalId, amount, served back on lookup
+	var callbackRefID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/collection/v1_0/requesttopay":
+			var payload struct {
+				ExternalID string `json:"externalId"`
+				Amount     string `json:"amount"`
+				Currency   string `json:"currency"`
+			}
+			body, _ := io.ReadAll(r.Body)
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Errorf("bad requesttopay payload: %v", err)
+			}
+			mu.Lock()
+			record = map[string]string{"externalId": payload.ExternalID, "amount": payload.Amount, "currency": payload.Currency}
+			callbackRefID = r.Header.Get("X-Reference-Id")
+			mu.Unlock()
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/collection/v1_0/requesttopay/"):
+			mu.Lock()
+			defer mu.Unlock()
+			if len(record) == 0 {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf(
+				`{"externalId":%q,"amount":%q,"currency":%q,"status":"SUCCESSFUL","financialTransactionId":"ft-e2e"}`,
+				record["externalId"], record["amount"], record["currency"])))
+		case r.URL.Path == "/collection/token/":
+			_, _ = w.Write([]byte(`{"access_token":"test","expires_in":3600}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(dummyConfig(server.URL, server.Client()))
+	initiated, err := paymentservice.NewCollector(paymentservice.NewSQLDepositStore(fx.db), client).InitiateDeposit(ctx, paymentservice.CollectionInput{
+		DepositInput: paymentservice.DepositInput{
+			UserID:   fx.user,
+			WalletID: fx.wallet,
+			Method:   ProviderName,
+			Amount:   decimal.NewFromInt(30),
+			Currency: "GHS",
+		},
+		Phone: "233240000000",
+	})
+	if err != nil {
+		t.Fatalf("InitiateDeposit: %v", err)
+	}
+	mu.Lock()
+	callbackID := callbackRefID
+	mu.Unlock()
+	if callbackID == "" || callbackID != initiated.ProviderReference {
+		t.Fatalf("provider reference not the X-Reference-Id MTN received: sent %q got %q", callbackID, initiated.ProviderReference)
+	}
+
+	// The default wallet starts at 100 with the fixture's unrelated payment.
+	route := settlementRoute(t, fx, server)
+	if got := sendSettlement(route, fmt.Sprintf(
+		`{"externalId":%q,"amount":"30","currency":"GHS","status":"SUCCESSFUL","financialTransactionId":"ft-e2e"}`,
+		initiated.Payment.Reference)); got != http.StatusOK {
+		t.Fatalf("settlement callback: %d", got)
+	}
+
+	var status, balance string
+	if err := fx.db.QueryRowContext(ctx, `SELECT status FROM payments WHERE id=$1`, initiated.Payment.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.db.QueryRowContext(ctx, `SELECT available_balance::text FROM wallets WHERE id=$1`, fx.wallet).Scan(&balance); err != nil {
+		t.Fatal(err)
+	}
+	if status != "COMPLETED" || balance != "130.00000000" {
+		t.Fatalf("end-to-end settlement wrong: status=%s balance=%s", status, balance)
+	}
+}
+
+// TestInitiateWithdrawalAndSettle_Postgres runs the full asynchronous
+// withdrawal path with the real MTN client against a mock MTN server:
+// initiation reserves funds and persists the provider reference, and the
+// webhook then debits the locked funds on the provider's SUCCESSFUL status.
+func TestInitiateWithdrawalAndSettle_Postgres(t *testing.T) {
+	dsn := os.Getenv("LIGHTEX_CALLBACK_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set LIGHTEX_CALLBACK_TEST_DATABASE_URL for PostgreSQL integration")
+	}
+	ctx := context.Background()
+	fx := newSettlementFixture(t, ctx, dsn, true)
+
+	var mu sync.Mutex
+	record := map[string]string{} // externalId, amount, currency served back on lookup
+	var transferRefID string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/disbursement/v1_0/transfer":
+			var payload struct {
+				ExternalID string `json:"externalId"`
+				Amount     string `json:"amount"`
+				Currency   string `json:"currency"`
+			}
+			body, _ := io.ReadAll(r.Body)
+			if err := json.Unmarshal(body, &payload); err != nil {
+				t.Errorf("bad transfer payload: %v", err)
+			}
+			mu.Lock()
+			record = map[string]string{"externalId": payload.ExternalID, "amount": payload.Amount, "currency": payload.Currency}
+			transferRefID = r.Header.Get("X-Reference-Id")
+			mu.Unlock()
+			w.WriteHeader(http.StatusAccepted)
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/disbursement/v1_0/transfer/"):
+			mu.Lock()
+			defer mu.Unlock()
+			if len(record) == 0 {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(fmt.Sprintf(
+				`{"externalId":%q,"amount":%q,"currency":%q,"status":"SUCCESSFUL","financialTransactionId":"ft-wth"}`,
+				record["externalId"], record["amount"], record["currency"])))
+		case r.URL.Path == "/disbursement/token/":
+			_, _ = w.Write([]byte(`{"access_token":"test","expires_in":3600}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(dummyConfig(server.URL, server.Client()))
+	initiated, err := paymentservice.NewCollector(paymentservice.NewSQLDepositStore(fx.db), client).InitiateWithdrawal(ctx, paymentservice.CollectionInput{
+		DepositInput: paymentservice.DepositInput{
+			UserID:   fx.user,
+			WalletID: fx.wallet,
+			Method:   ProviderName,
+			Amount:   decimal.NewFromInt(30),
+			Currency: "GHS",
+		},
+		Phone: "233240000000",
+	})
+	if err != nil {
+		t.Fatalf("InitiateWithdrawal: %v", err)
+	}
+	mu.Lock()
+	transferID := transferRefID
+	mu.Unlock()
+	if transferID == "" || transferID != initiated.ProviderReference {
+		t.Fatalf("provider reference not the X-Reference-Id MTN received: sent %q got %q", transferID, initiated.ProviderReference)
+	}
+	var available, locked string
+	if err := fx.db.QueryRowContext(ctx, `SELECT available_balance::text, locked_balance::text FROM wallets WHERE id=$1`, fx.wallet).Scan(&available, &locked); err != nil {
+		t.Fatal(err)
+	}
+	if available != "70.00000000" || locked != "30.00000000" {
+		t.Fatalf("reservation wrong after initiation: available=%s locked=%s", available, locked)
+	}
+
+	route := settlementRoute(t, fx, server)
+	if got := sendSettlement(route, fmt.Sprintf(
+		`{"externalId":%q,"amount":"30","currency":"GHS","status":"SUCCESSFUL","financialTransactionId":"ft-wth"}`,
+		initiated.Payment.Reference)); got != http.StatusOK {
+		t.Fatalf("settlement callback: %d", got)
+	}
+
+	var status string
+	if err := fx.db.QueryRowContext(ctx, `SELECT status FROM payments WHERE id=$1`, initiated.Payment.ID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.db.QueryRowContext(ctx, `SELECT available_balance::text, locked_balance::text FROM wallets WHERE id=$1`, fx.wallet).Scan(&available, &locked); err != nil {
+		t.Fatal(err)
+	}
+	if status != "COMPLETED" || available != "70.00000000" || locked != "0.00000000" {
+		t.Fatalf("end-to-end withdrawal settlement wrong: status=%s available=%s locked=%s", status, available, locked)
+	}
+	var entries int
+	if err := fx.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ledger_entries`).Scan(&entries); err != nil {
+		t.Fatal(err)
+	}
+	if entries != 1 {
+		t.Fatalf("expected one ledger entry after settlement, got %d", entries)
 	}
 }
 
