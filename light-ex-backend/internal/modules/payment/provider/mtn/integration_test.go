@@ -132,3 +132,78 @@ func TestMTNSandboxCollectionContract(t *testing.T) {
 		t.Errorf("unknown sandbox status %q", record.Status)
 	}
 }
+
+// TestMTNSandboxDisbursementContract runs a real sandbox transfer and then
+// reads it back through LookupTransaction, validating that the live disbursement
+// response carries all fields strict callback verification depends on.
+// No real money moves: sandbox transfers do not pay anyone and a FAILED status
+// (for example an unfunded sandbox wallet) still satisfies the contract check.
+func TestMTNSandboxDisbursementContract(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	cfg := loadSandboxConfig(t)
+	if !cfg.Disbursement.IsConfigured() {
+		t.Skip("skipping MTN sandbox disbursement test: disbursement credentials not configured")
+	}
+	client := NewClient(cfg)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	reference := "E2E-" + uuid.NewString()
+	res, err := client.Disburse(ctx, provider.Request{
+		Reference: reference,
+		Amount:    decimal.NewFromInt(5),
+		Currency:  "EUR",
+		Phone:     "233240000000",
+	})
+	if err != nil {
+		t.Fatalf("real sandbox transfer: %v", err)
+	}
+	if res.ProviderReference == "" || res.Status != provider.StatusPending {
+		t.Fatalf("unexpected disburse result: %+v", res)
+	}
+	t.Logf("sandbox transfer accepted: reference=%s providerReference=%s", reference, res.ProviderReference)
+
+	// Sandbox records can take a beat to become readable; retry briefly on 404.
+	var record TransactionStatusResponse
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		record, err = client.LookupTransaction(ctx, "WITHDRAWAL", res.ProviderReference)
+		if err == nil || (time.Now().Before(deadline) && errors.Is(err, ErrStatusNotFound)) {
+			if err == nil {
+				break
+			}
+			time.Sleep(time.Second)
+			continue
+		}
+		t.Fatalf("real sandbox status lookup: %v", err)
+	}
+
+	if record.ExternalID != reference {
+		t.Errorf("sandbox externalId mismatch: got %q want %q", record.ExternalID, reference)
+	}
+	amount, aerr := decimal.NewFromString(record.Amount)
+	if aerr != nil || !amount.Equal(decimal.NewFromInt(5)) {
+		t.Errorf("sandbox amount mismatch: got %q (%v)", record.Amount, aerr)
+	}
+	if record.Currency != "EUR" {
+		t.Errorf("sandbox currency mismatch: got %q", record.Currency)
+	}
+	switch record.Status {
+	case MTNStatusPending, MTNStatusSuccessful:
+		if record.FinancialTransactionID == "" {
+			t.Errorf("sandbox financialTransactionId empty for status %q", record.Status)
+		}
+		t.Logf("sandbox disbursement record decoded fully: providerReference=%s financialTransactionId=%s status=%s", res.ProviderReference, record.FinancialTransactionID, record.Status)
+	case MTNStatusFailed:
+		if reason, ok := record.Reason.(string); ok && record.Reason != nil {
+			t.Logf("sandbox disbursement record FAILED with reason %q (sandbox wallet state, contract still valid)", reason)
+		} else {
+			t.Logf("sandbox disbursement record FAILED with reason %+v (sandbox wallet state, contract still valid)", record.Reason)
+		}
+	default:
+		t.Errorf("unknown sandbox disbursement status %q", record.Status)
+	}
+}
