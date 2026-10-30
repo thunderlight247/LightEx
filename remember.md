@@ -584,22 +584,20 @@ Mobile Money, banks, crypto networks, webhooks, and retries belong in the extern
 
 Phase 4 (Core Financial Engine) was completed and verified:
 - Transaction domain, repository, and service with atomic boundaries.
-- Ledger double-entry accounting and invariant checks.
+- Ledger entry posting and invariant checks; double-entry accounting remains a future design decision.
 - Payment domain, repository, and service lifecycle.
 - Deposit orchestration, withdrawal orchestration, and atomic internal settlement.
 - Idempotency and transaction state machines.
 
-In Phase 5, the following external payment integrations have been completed:
+Phase 5 implementation status:
 - Generic `provider.Provider` abstraction (`Collect`, `Disburse`, request validation).
-- MTN Mobile Money integration (`requesttopay`, `transfer`, OAuth2 token caching, status lookups, and webhook parsing).
-- Bank transfer integration (Account validation, deposit reference allocation, disburse, status checks).
-- Crypto integration (Address validation for EVM, TRON, BTC; deposit monitoring and withdrawal dispatch).
-- Network retry mechanism (Exponential backoff with jitter and transient network error filtering).
-- Automated payment status reconciliation worker.
+- MTN Mobile Money client and webhook parser exist; live sandbox verification, authentication of callbacks and route/settlement wiring remain incomplete.
+- Bank and crypto providers are in-memory simulations; neither connects to a bank or blockchain or moves funds.
+- Network retry mechanism and a reconciliation worker exist; their presence does not establish an operational external payment flow.
 
 Remaining in Phase 5:
-- Liquidity provider integration (liquidity sourcing and rate feeds).
-- External provider webhook deduplication protection.
+- Real liquidity provider integration (liquidity sourcing and rate feeds). A development-only simulator now exists; its invented rates and orders are not real liquidity.
+- External provider webhook deduplication protection: PostgreSQL-backed MTN deduplication primitive exists, but callback authentication, settlement processing, and route wiring remain outstanding.
 
 ---
 
@@ -712,17 +710,27 @@ Remaining in Phase 5:
 
 ## 🔄 Phase 5 — External Payment Infrastructure
 
+### Simulated liquidity (development only)
+
+`internal/modules/liquidity` contains provider-neutral pair, quote and order models, a provider interface, and a simulated provider. In `APP_ENV=development` the authenticated `/api/v1/simulated-liquidity` routes expose quote creation, order creation, order lookup and reconciliation. Pairs GHS/USDT and GHS/USDC in either direction use **invented fixed rates** (0.1 and 10); they are not market prices or executable quotes. Quotes expire after one minute. Orders support successful, pending, failed, rejected and uncertain timeout scenarios in tests; the HTTP module uses the success scenario. A provider success is not verified settlement. Simulation never interacts with wallets, transactions, payments, or ledger entries.
+
+The service and simulated provider store quotes, orders and idempotency keys in process memory. Idempotency protects concurrent requests only in one process, does not survive a restart, and has no durable audit history; logs are informational only. Simulated reconciliation checks the same provider reference but is not a background worker. Do not use this service for real providers or financial execution. No migration was added for this simulator.
+
+**Future HoneyCoin adapter (candidate only):** Public [onramp](https://docs.honeycoin.app/docs/onramps) and [offramp](https://docs.honeycoin.app/docs/offramps) documentation describes asynchronous operations, references, status lookups, wallet addresses, chains and payout details. Before a real adapter, confirm Ghana market eligibility, API version and rate response schemas (the public guide and API reference differ), quote expiry and fees, authentication, idempotency, callbacks and reconciliation, sandbox behavior, and supported settlement flows. The current provider contract and order model will need review for provider quote IDs, amount rounding/fees, address and payout data, and durable restart-safe reconciliation; no claim of drop-in compatibility is made.
+
+**Still unresolved:** asset custody and settlement design, business registration and onboarding, provider approval and credentials, KYC/AML and regulatory eligibility, durable storage/audit and provider idempotency, production security, and independent settlement verification. No real-money execution, provider onboarding, or custody choice is implemented or approved.
+
+
 - [x] Provider abstraction (payment/provider: Provider interface with Collect/Disburse and request validation; covered by provider_test.go)
 - [x] Mobile Money integration (MTN MoMo client implementing `provider.Provider` with `Collect` via `requesttopay`, `Disburse` via `transfer`, OAuth2 token caching, and transaction status polling; covered by client_test.go, token_test.go, integration_test.go)
 - [x] Webhooks (MTN MoMo webhook callback parser and Gin handler; covered by webhook_test.go)
 - [x] Callback processing (CallbackNotification mapping to generic provider status and processor hook)
-- [x] Bank transfer integration (payment/provider/bank: Bank transfer provider with account validation, Collect, Disburse, and CheckStatus; covered by bank_test.go)
-- [x] Crypto deposit (payment/provider/crypto: Crypto deposit address assignment and confirmation tracking; covered by crypto_test.go)
-- [x] Crypto withdrawal (payment/provider/crypto: On-chain transaction dispatch and hash tracking; covered by crypto_test.go)
+- [ ] Real bank transfer integration (`payment/provider/bank` is an in-memory simulation only)
+- [ ] Real crypto deposit and withdrawal (`payment/provider/crypto` stores simulated transactions and hashes; it does not interact with a blockchain)
 - [x] Retry mechanism (payment/provider/retry: Exponential backoff with jitter and network transient error classification; covered by retry_test.go)
 - [x] Reconciliation (payment/reconciliation: Background worker finding stale processing payments and atomically settling or failing with balance unlock; covered by worker_test.go)
-- [ ] Liquidity provider integration
-- [ ] Provider callback deduplication protection
+- [ ] Real liquidity provider integration (a standalone simulated liquidity module is implemented for development; no real provider, funds, rates, or settlement)
+- [ ] Provider callback deduplication protection (MTN PostgreSQL transactional deduplication primitive added with migration 000006; not yet wired to authenticated callback settlement or routes)
 
 ## ⏳ Phase 6 — KYC / Risk / Limits
 
@@ -912,9 +920,9 @@ The migration naming is now standardized through `000005`; the previous typo `00
 
 ### 🔄 Now (Remaining in Phase 5 — External Payment Infrastructure)
 
-1. Implement Liquidity Provider abstraction and integration (`internal/modules/payment/provider/liquidity`).
-2. Add webhook callback deduplication protection.
-3. Wire payment providers and webhooks into HTTP routes.
+1. Develop and evaluate simulated liquidity. Real provider onboarding is deferred; HoneyCoin is a candidate only, not an approved integration. Verify its rate endpoint and response schema and sandbox market availability before implementing or using real financial rates.
+2. Wire the MTN PostgreSQL callback deduplication primitive into authenticated callback processing, with settlement in the same transaction; apply migration 000006 before use.
+3. Wire payment providers and webhooks into HTTP routes only after callback authentication and settlement processing are in place.
 
 ### ⏳ Next (Phase 6 — KYC / Risk / Limits)
 
@@ -946,8 +954,8 @@ Internal settlement            ✅ (Phase 4 Complete)
 Idempotency                    ✅ (Phase 4 Complete)
 State machines                 ✅ (Phase 4 Complete)
 Mobile Money provider (MTN)    ✅ (Phase 5)
-Bank transfer provider         ✅ (Phase 5)
-Crypto provider (Deposit/Wth)  ✅ (Phase 5)
+Bank transfer provider         ⏳ (simulation only)
+Crypto provider (Deposit/Wth)  ⏳ (simulation only)
 Retry mechanism (Backoff)      ✅ (Phase 5)
 Reconciliation worker          ✅ (Phase 5)
 

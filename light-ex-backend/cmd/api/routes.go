@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	auth "github.com/light-group/light-ex-backend/internal/modules/auth"
+	liquidity "github.com/light-group/light-ex-backend/internal/modules/liquidity"
 	wallet "github.com/light-group/light-ex-backend/internal/modules/wallet"
 	"github.com/light-group/light-ex-backend/internal/platform/bootstrap"
 	"github.com/light-group/light-ex-backend/internal/platform/middleware"
@@ -44,4 +45,9 @@ func RegisterRoutes(
 	// Wallet
 	walletModule := wallet.New(app.Database.SQL())
 	walletModule.RegisterRoutes(v1, authMiddleware)
+
+	// Simulations are intentionally unavailable outside development.
+	if app.Config.App.Env == "development" {
+		liquidity.New().RegisterRoutes(v1, authMiddleware)
+	}
 }
