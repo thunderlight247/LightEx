@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("KYC submission not found")
-	ErrConflict = errors.New("KYC submission already exists or is no longer pending")
+	ErrNotFound     = errors.New("KYC submission not found")
+	ErrConflict     = errors.New("KYC submission already exists or is no longer pending")
+	ErrUserNotFound = errors.New("user not found")
 )
 
 type Repository interface {
@@ -19,4 +20,6 @@ type Repository interface {
 	FindByID(context.Context, uuid.UUID) (*domain.Submission, error)
 	Review(context.Context, uuid.UUID, uuid.UUID, domain.Status) (*domain.Submission, error)
 	IsReviewer(context.Context, uuid.UUID) (bool, error)
+	GrantReviewerByEmail(context.Context, string) (uuid.UUID, error)
+	RevokeReviewerByEmail(context.Context, string) (uuid.UUID, error)
 }

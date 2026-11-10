@@ -50,6 +50,39 @@ func (r *Repository) IsReviewer(ctx context.Context, user uuid.UUID) (bool, erro
 	err := r.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM kyc_reviewers r JOIN users u ON u.id=r.user_id WHERE r.user_id=$1 AND u.status='ACTIVE' AND u.email_verified=true)`, user).Scan(&allowed)
 	return allowed, err
 }
+
+// GrantReviewerByEmail adds a reviewer grant for an existing user. Granting twice is a no-op.
+func (r *Repository) GrantReviewerByEmail(ctx context.Context, email string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := r.db.QueryRowContext(ctx, `WITH u AS (SELECT id FROM users WHERE email=$1)
+		INSERT INTO kyc_reviewers (user_id) SELECT id FROM u ON CONFLICT (user_id) DO NOTHING RETURNING user_id`, email).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := r.db.QueryRowContext(ctx, `SELECT id FROM users WHERE email=$1`, email).Scan(&id); errors.Is(err, sql.ErrNoRows) {
+			return uuid.Nil, repository.ErrUserNotFound
+		} else if err != nil {
+			return uuid.Nil, err
+		}
+		return id, nil
+	}
+	return id, err
+}
+
+// RevokeReviewerByEmail removes a reviewer grant. Revoking an absent grant is a no-op.
+func (r *Repository) RevokeReviewerByEmail(ctx context.Context, email string) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := r.db.QueryRowContext(ctx, `SELECT id FROM users WHERE email=$1`, email).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return uuid.Nil, repository.ErrUserNotFound
+	}
+	if err != nil {
+		return uuid.Nil, err
+	}
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM kyc_reviewers WHERE user_id=$1`, id); err != nil {
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
 func (r *Repository) Review(ctx context.Context, id, reviewer uuid.UUID, decision domain.Status) (*domain.Submission, error) {
 	s, err := scan(r.db.QueryRowContext(ctx, `UPDATE kyc_submissions SET status=$3,reviewer_id=$2,reviewed_at=NOW() WHERE id=$1 AND status='PENDING' AND user_id<>$2 AND EXISTS (SELECT 1 FROM kyc_reviewers r JOIN users u ON u.id=r.user_id WHERE r.user_id=$2 AND u.status='ACTIVE' AND u.email_verified=true) RETURNING `+columns, id, reviewer, decision))
 	if errors.Is(err, repository.ErrNotFound) {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -49,6 +50,20 @@ func (s *Service) Eligibility(ctx context.Context, user uuid.UUID) (domain.Eligi
 		return domain.Eligibility{}, errors.New("invalid KYC repository response")
 	}
 	return domain.AssessEligibility(submission), nil
+}
+
+// GrantReviewer and RevokeReviewer are operator actions keyed by account email.
+// They are not exposed over HTTP because the API has no administrator role.
+func (s *Service) GrantReviewer(ctx context.Context, email string) (uuid.UUID, error) {
+	return s.repo.GrantReviewerByEmail(ctx, normalizeEmail(email))
+}
+
+func (s *Service) RevokeReviewer(ctx context.Context, email string) (uuid.UUID, error) {
+	return s.repo.RevokeReviewerByEmail(ctx, normalizeEmail(email))
+}
+
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 func (s *Service) authorizeReviewer(ctx context.Context, reviewer uuid.UUID) error {

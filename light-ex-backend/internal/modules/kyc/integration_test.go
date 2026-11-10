@@ -349,6 +349,51 @@ func TestEligibilityLifecycleHTTP(t *testing.T) {
 	get(owner, "APPROVED", "IDENTITY_VERIFICATION_REQUIRED")
 }
 
+func TestReviewerGrantAdministrationPostgres(t *testing.T) {
+	db := fixture(t)
+	svc := service.New(postgres.New(db))
+	ctx := context.Background()
+	reviewer := addUser(t, db)
+	if _, err := db.Exec(`UPDATE users SET email=$1, email_verified=true WHERE id=$2`, "reviewer@example.com", reviewer); err != nil {
+		t.Fatal(err)
+	}
+	isReviewer := func() bool {
+		allowed, err := postgres.New(db).IsReviewer(ctx, reviewer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return allowed
+	}
+	if isReviewer() {
+		t.Fatal("user is a reviewer before any grant")
+	}
+	// Email is normalized, so operator input casing and whitespace do not matter.
+	if id, err := svc.GrantReviewer(ctx, "  reviewer@example.com "); err != nil || id != reviewer {
+		t.Fatalf("grant: %v %v", id, err)
+	}
+	if !isReviewer() {
+		t.Fatal("grant did not take effect")
+	}
+	if _, err := svc.GrantReviewer(ctx, "reviewer@example.com"); err != nil {
+		t.Fatalf("repeat grant should be a no-op: %v", err)
+	}
+	if id, err := svc.RevokeReviewer(ctx, "reviewer@example.com"); err != nil || id != reviewer {
+		t.Fatalf("revoke: %v %v", id, err)
+	}
+	if isReviewer() {
+		t.Fatal("revoke did not take effect")
+	}
+	if _, err := svc.RevokeReviewer(ctx, "reviewer@example.com"); err != nil {
+		t.Fatalf("repeat revoke should be a no-op: %v", err)
+	}
+	if _, err := svc.GrantReviewer(ctx, "nobody@example.com"); !errors.Is(err, repository.ErrUserNotFound) {
+		t.Fatalf("unknown grant: %v", err)
+	}
+	if _, err := svc.RevokeReviewer(ctx, "nobody@example.com"); !errors.Is(err, repository.ErrUserNotFound) {
+		t.Fatalf("unknown revoke: %v", err)
+	}
+}
+
 func TestKYCHTTPUserIsolation(t *testing.T) {
 	db := fixture(t)
 	owner, other := addUser(t, db), addUser(t, db)
