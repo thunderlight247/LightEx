@@ -9,8 +9,11 @@ import (
 
 type Module struct{ handler *handler.Handler }
 
-func New() *Module {
-	return &Module{handler: handler.New(service.New(simulated.New(simulated.Success)))}
+func New(scenario simulated.Scenario) *Module {
+	if scenario == "" {
+		scenario = simulated.Success
+	}
+	return &Module{handler: handler.New(service.New(simulated.New(scenario)))}
 }
 func (m *Module) RegisterRoutes(router *gin.RouterGroup, auth gin.HandlerFunc) {
 	m.handler.RegisterRoutes(router, auth)

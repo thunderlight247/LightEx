@@ -23,6 +23,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup, auth gin.HandlerFunc) {
 	g.POST("/orders", h.order)
 	g.GET("/orders/:id", h.getOrder)
 	g.POST("/orders/:id/reconcile", h.reconcile)
+	g.POST("/orders/:id/simulated-outcome", h.simulatedOutcome)
 }
 func user(c *gin.Context) (uuid.UUID, bool) {
 	id, err := uuid.Parse(middleware.UserID(c))
@@ -35,11 +36,11 @@ func user(c *gin.Context) (uuid.UUID, bool) {
 func respondError(c *gin.Context, err error) {
 	status := http.StatusInternalServerError
 	switch {
-	case errors.Is(err, domain.ErrInvalidPair), errors.Is(err, domain.ErrInvalidAmount), errors.Is(err, service.ErrInvalidKey):
+	case errors.Is(err, domain.ErrInvalidPair), errors.Is(err, domain.ErrInvalidAmount), errors.Is(err, service.ErrInvalidKey), errors.Is(err, service.ErrInvalidOutcome):
 		status = http.StatusBadRequest
 	case errors.Is(err, service.ErrNotFound):
 		status = http.StatusNotFound
-	case errors.Is(err, service.ErrConflict), errors.Is(err, domain.ErrQuoteExpired):
+	case errors.Is(err, service.ErrConflict), errors.Is(err, domain.ErrQuoteExpired), errors.Is(err, domain.ErrTransition), errors.Is(err, provider.ErrNotFound):
 		status = http.StatusConflict
 	case errors.Is(err, provider.ErrRejected):
 		status = http.StatusUnprocessableEntity
@@ -113,6 +114,32 @@ func (h *Handler) getOrder(c *gin.Context) {
 	}
 	c.JSON(200, o)
 }
+
+// simulatedOutcome alters the fake provider record, not the order or balances.
+func (h *Handler) simulatedOutcome(c *gin.Context) {
+	userID, ok := user(c)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid order id"})
+		return
+	}
+	var req struct {
+		Status domain.Status `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+	if err := h.service.SetSimulatedOutcome(userID, id, req.Status); err != nil {
+		respondError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *Handler) reconcile(c *gin.Context) {
 	userID, ok := user(c)
 	if !ok {

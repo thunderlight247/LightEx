@@ -97,3 +97,41 @@ Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
     "phone": "+233241234567",
     "description": "Withdrawal from LightEx"
 }
+
+###
+
+# Development-only liquidity simulation. Set SIMULATED_LIQUIDITY_SCENARIO to
+# pending or timeout before starting the API; none of these requests move funds.
+### Create simulated quote
+POST http://localhost:8080/api/v1/simulated-liquidity/quotes
+Content-Type: application/json
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+
+{
+    "from": "GHS",
+    "to": "USDC",
+    "amount": "100"
+}
+
+### Create simulated order (copy the quote id above)
+POST http://localhost:8080/api/v1/simulated-liquidity/orders
+Content-Type: application/json
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+
+{
+    "quote_id": "PASTE_QUOTE_ID_HERE",
+    "idempotency_key": "simulation-example-1"
+}
+
+### Simulate provider outcome (copy order id; status is SUCCEEDED or FAILED)
+POST http://localhost:8080/api/v1/simulated-liquidity/orders/PASTE_ORDER_ID_HERE/simulated-outcome
+Content-Type: application/json
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE
+
+{
+    "status": "SUCCEEDED"
+}
+
+### Reconcile the same order against the simulated provider
+POST http://localhost:8080/api/v1/simulated-liquidity/orders/PASTE_ORDER_ID_HERE/reconcile
+Authorization: Bearer PASTE_ACCESS_TOKEN_HERE

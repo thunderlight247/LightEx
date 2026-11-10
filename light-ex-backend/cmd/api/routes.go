@@ -4,7 +4,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	auth "github.com/light-group/light-ex-backend/internal/modules/auth"
+	kyc "github.com/light-group/light-ex-backend/internal/modules/kyc"
 	liquidity "github.com/light-group/light-ex-backend/internal/modules/liquidity"
+	"github.com/light-group/light-ex-backend/internal/modules/liquidity/provider/simulated"
 	payment "github.com/light-group/light-ex-backend/internal/modules/payment"
 	"github.com/light-group/light-ex-backend/internal/modules/payment/provider/mtn"
 	wallet "github.com/light-group/light-ex-backend/internal/modules/wallet"
@@ -48,9 +50,12 @@ func RegisterRoutes(
 	walletModule := wallet.New(app.Database.SQL())
 	walletModule.RegisterRoutes(v1, authMiddleware)
 
+	// KYC submissions and status are scoped to the authenticated user.
+	kyc.New(app.Database.SQL()).RegisterRoutes(v1, authMiddleware)
+
 	// Simulations are intentionally unavailable outside development.
 	if app.Config.App.Env == "development" {
-		liquidity.New().RegisterRoutes(v1, authMiddleware)
+		liquidity.New(simulated.Scenario(app.Config.App.SimulatedLiquidityScenario)).RegisterRoutes(v1, authMiddleware)
 	}
 
 	// MTN MoMo provider. Intentionally unauthenticated callback route: caller

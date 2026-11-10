@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	ContextUserID = "user_id"
+	ContextUserID    = "user_id"
+	ContextTokenType = "token_type"
 )
 
 func Authentication(jwt jwtservice.Service) gin.HandlerFunc {
@@ -61,6 +62,7 @@ func Authentication(jwt jwtservice.Service) gin.HandlerFunc {
 		}
 
 		c.Set(ContextUserID, claims.UserID)
+		c.Set(ContextTokenType, claims.TokenType)
 
 		c.Next()
 	}

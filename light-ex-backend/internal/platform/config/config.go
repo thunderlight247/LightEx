@@ -18,8 +18,9 @@ type Config struct {
 
 // AppConfig contains application settings.
 type AppConfig struct {
-	Name string
-	Env  string
+	Name                       string
+	Env                        string
+	SimulatedLiquidityScenario string
 }
 
 // ServerConfig contains HTTP server settings.
@@ -45,10 +46,10 @@ type DatabaseConfig struct {
 
 // JWTConfig contains JWT settings.
 type JWTConfig struct {
-    Secret          string
-    Issuer          string
-    AccessTokenTTL  time.Duration
-    RefreshTokenTTL time.Duration
+	Secret          string
+	Issuer          string
+	AccessTokenTTL  time.Duration
+	RefreshTokenTTL time.Duration
 }
 
 // Load loads the application configuration.
@@ -58,8 +59,9 @@ func Load() (*Config, error) {
 
 	cfg := &Config{
 		App: AppConfig{
-			Name: getEnv("APP_NAME", "LightEx"),
-			Env:  getEnv("APP_ENV", "development"),
+			Name:                       getEnv("APP_NAME", "LightEx"),
+			Env:                        getEnv("APP_ENV", "development"),
+			SimulatedLiquidityScenario: getEnv("SIMULATED_LIQUIDITY_SCENARIO", "success"),
 		},
 
 		Server: ServerConfig{
@@ -68,7 +70,7 @@ func Load() (*Config, error) {
 		},
 
 		Database: DatabaseConfig{
-	  		Host:            getEnv("DB_HOST", "localhost"),
+			Host:            getEnv("DB_HOST", "localhost"),
 			Port:            getEnvAsInt("DB_PORT", 5432),
 			Name:            getEnv("DB_NAME", "lightex"),
 			User:            getEnv("DB_USER", "lightex_app"),
@@ -80,27 +82,27 @@ func Load() (*Config, error) {
 			ConnMaxIdleTime: getEnvAsDuration("DB_CONN_MAX_IDLE_TIME", 15*time.Minute),
 		},
 
-        JWT: JWTConfig{
-          Secret: getEnv(
-            "JWT_SECRET",
-            "CHANGE_THIS_IN_PRODUCTION",
-          ),
+		JWT: JWTConfig{
+			Secret: getEnv(
+				"JWT_SECRET",
+				"CHANGE_THIS_IN_PRODUCTION",
+			),
 
-          Issuer: getEnv(
-           "JWT_ISSUER",
-           "LightEx",
-          ),
+			Issuer: getEnv(
+				"JWT_ISSUER",
+				"LightEx",
+			),
 
-          AccessTokenTTL: getEnvAsDuration(
-            "JWT_ACCESS_TTL",
-             15*time.Minute,
-          ),
+			AccessTokenTTL: getEnvAsDuration(
+				"JWT_ACCESS_TTL",
+				15*time.Minute,
+			),
 
-          RefreshTokenTTL: getEnvAsDuration(
-            "JWT_REFRESH_TTL",
-            7*24*time.Hour,
-          ),
-       },
+			RefreshTokenTTL: getEnvAsDuration(
+				"JWT_REFRESH_TTL",
+				7*24*time.Hour,
+			),
+		},
 	}
 
 	if err := validate(cfg); err != nil {

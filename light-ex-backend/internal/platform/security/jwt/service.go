@@ -60,6 +60,7 @@ func (s *JWTService) GenerateAccessToken(
 			NotBefore: jwtv5.NewNumericDate(now),
 			ExpiresAt: jwtv5.NewNumericDate(now.Add(s.accessTTL)),
 		},
+		TokenType: "access",
 	}
 
 	token := jwtv5.NewWithClaims(
@@ -86,6 +87,7 @@ func (s *JWTService) GenerateRefreshToken(
 			NotBefore: jwtv5.NewNumericDate(now),
 			ExpiresAt: jwtv5.NewNumericDate(now.Add(s.refreshTTL)),
 		},
+		TokenType: "refresh",
 	}
 
 	token := jwtv5.NewWithClaims(

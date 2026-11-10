@@ -15,6 +15,14 @@ func validate(cfg *Config) error {
 		return errors.New("APP_NAME is required")
 	}
 
+	if cfg.App.Env == "development" {
+		switch cfg.App.SimulatedLiquidityScenario {
+		case "", "success", "pending", "failure", "reject", "timeout":
+		default:
+			return errors.New("SIMULATED_LIQUIDITY_SCENARIO must be success, pending, failure, reject, or timeout")
+		}
+	}
+
 	// Server
 	if cfg.Server.Port <= 0 {
 		return errors.New("SERVER_PORT must be greater than 0")

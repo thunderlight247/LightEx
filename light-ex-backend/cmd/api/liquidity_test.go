@@ -99,4 +99,59 @@ func TestSimulatedLiquidityRoutesIsolation(t *testing.T) {
 	if rec.Code != 404 {
 		t.Fatalf("simulation exposed outside development: %d", rec.Code)
 	}
+	rec = httptest.NewRecorder()
+	prod.ServeHTTP(rec, httptest.NewRequest("POST", path+"/orders/"+uuid.NewString()+"/simulated-outcome", nil))
+	if rec.Code != 404 {
+		t.Fatalf("simulation outcome control exposed outside development: %d", rec.Code)
+	}
+
+	for _, tc := range []struct {
+		scenario string
+		want     domain.Status
+	}{
+		{"success", domain.StatusSucceeded},
+		{"pending", domain.StatusPending},
+		{"failure", domain.StatusFailed},
+		{"reject", domain.StatusFailed},
+		{"timeout", domain.StatusUncertain},
+	} {
+		t.Run(tc.scenario, func(t *testing.T) {
+			cfg.App.Env = "development"
+			cfg.App.SimulatedLiquidityScenario = tc.scenario
+			r = gin.New()
+			RegisterRoutes(r, &bootstrap.Application{Config: cfg, Database: db})
+			w := send(path+"/quotes", `{"from":"GHS","to":"USDC","amount":"100"}`, token)
+			if w.Code != 201 {
+				t.Fatalf("quote %d %s", w.Code, w.Body.String())
+			}
+			var quote domain.Quote
+			if err := json.Unmarshal(w.Body.Bytes(), &quote); err != nil {
+				t.Fatal(err)
+			}
+			w = send(path+"/orders", `{"quote_id":"`+quote.ID.String()+`","idempotency_key":"scenario"}`, token)
+			if w.Code != 200 {
+				t.Fatalf("order %d %s", w.Code, w.Body.String())
+			}
+			var order domain.Order
+			if err := json.Unmarshal(w.Body.Bytes(), &order); err != nil {
+				t.Fatal(err)
+			}
+			if order.Status != tc.want || !order.Simulated || order.Settlement != "NOT_VERIFIED" {
+				t.Fatalf("unexpected order: %+v", order)
+			}
+			if tc.scenario == "timeout" {
+				w = send(path+"/orders/"+order.ID.String()+"/reconcile", `{}`, token)
+				if w.Code != 200 {
+					t.Fatalf("reconcile %d %s", w.Code, w.Body.String())
+				}
+				var reconciled domain.Order
+				if err := json.Unmarshal(w.Body.Bytes(), &reconciled); err != nil {
+					t.Fatal(err)
+				}
+				if reconciled.ID != order.ID || reconciled.ProviderReference != order.ProviderReference || reconciled.Status != domain.StatusPending {
+					t.Fatalf("unexpected reconciliation: %+v", reconciled)
+				}
+			}
+		})
+	}
 }

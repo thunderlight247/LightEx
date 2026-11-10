@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/light-group/light-ex-backend/internal/modules/liquidity/domain"
 	"github.com/light-group/light-ex-backend/internal/modules/liquidity/provider"
+	"github.com/light-group/light-ex-backend/internal/modules/liquidity/provider/simulated"
 	"github.com/shopspring/decimal"
 )
 
@@ -20,6 +21,7 @@ var (
 	ErrConflict         = errors.New("idempotency key or quote already used")
 	ErrInvalidKey       = errors.New("idempotency key must be between 1 and 120 characters")
 	ErrProviderResponse = errors.New("invalid or non-simulated provider response")
+	ErrInvalidOutcome   = errors.New("simulated outcome must be SUCCEEDED or FAILED")
 )
 
 // Service is intentionally restricted to simulations and in-memory persistence.
@@ -132,6 +134,28 @@ func (s *Service) GetOrder(user, id uuid.UUID) (domain.Order, error) {
 		return domain.Order{}, ErrNotFound
 	}
 	return o, nil
+}
+
+// SetSimulatedOutcome changes only the simulated provider's status. Reconcile
+// must be called separately to observe it on the order; it never settles funds.
+func (s *Service) SetSimulatedOutcome(user, id uuid.UUID, status domain.Status) error {
+	if status != domain.StatusSucceeded && status != domain.StatusFailed {
+		return ErrInvalidOutcome
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	o, ok := s.orders[id]
+	if !ok || o.UserID != user {
+		return ErrNotFound
+	}
+	if o.Status == domain.StatusSucceeded || o.Status == domain.StatusFailed {
+		return domain.ErrTransition
+	}
+	p, ok := s.provider.(*simulated.Provider)
+	if !ok || !o.Simulated {
+		return ErrProviderResponse
+	}
+	return p.SetStatus(o.ProviderReference, status)
 }
 
 // Reconcile checks the same provider reference. A missing or invalid response is
