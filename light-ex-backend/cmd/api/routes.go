@@ -1,7 +1,12 @@
 package main
 
 import (
+	"fmt"
+	"os"
+	"strings"
+
 	"github.com/gin-gonic/gin"
+	"github.com/shopspring/decimal"
 
 	auth "github.com/light-group/light-ex-backend/internal/modules/auth"
 	kyc "github.com/light-group/light-ex-backend/internal/modules/kyc"
@@ -9,11 +14,34 @@ import (
 	"github.com/light-group/light-ex-backend/internal/modules/liquidity/provider/simulated"
 	payment "github.com/light-group/light-ex-backend/internal/modules/payment"
 	"github.com/light-group/light-ex-backend/internal/modules/payment/provider/mtn"
+	"github.com/light-group/light-ex-backend/internal/modules/payment/service"
 	wallet "github.com/light-group/light-ex-backend/internal/modules/wallet"
 	"github.com/light-group/light-ex-backend/internal/platform/bootstrap"
 	"github.com/light-group/light-ex-backend/internal/platform/middleware"
 	jwtservice "github.com/light-group/light-ex-backend/internal/platform/security/jwt"
 )
+
+// paymentLimitsFromEnv reads optional per-transaction maximums. An unset value
+// means unlimited. A set value that is not a non-negative decimal stops startup,
+// so a typo can never silently remove a configured cap.
+func paymentLimitsFromEnv() service.Limits {
+	return service.Limits{
+		MaxDeposit:    mustLimitFromEnv("PAYMENT_MAX_DEPOSIT"),
+		MaxWithdrawal: mustLimitFromEnv("PAYMENT_MAX_WITHDRAWAL"),
+	}
+}
+
+func mustLimitFromEnv(key string) decimal.Decimal {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return decimal.Zero
+	}
+	value, err := decimal.NewFromString(raw)
+	if err != nil || value.IsNegative() {
+		panic(fmt.Sprintf("%s must be a non-negative decimal, got %q", key, raw))
+	}
+	return value
+}
 
 // RegisterRoutes registers all API routes.
 func RegisterRoutes(
@@ -70,7 +98,10 @@ func RegisterRoutes(
 		client := mtn.NewClient(mtnCfg)
 
 		// Deposits and withdrawals require an APPROVED KYC submission.
-		paymentModule := payment.New(app.Database.SQL()).WithInitiator(client).WithKYCGate(kycModule.PaymentGate())
+		paymentModule := payment.New(app.Database.SQL()).
+			WithLimits(paymentLimitsFromEnv()).
+			WithInitiator(client).
+			WithKYCGate(kycModule.PaymentGate())
 
 		if mtnCfg.Collection.IsConfigured() {
 			paymentModule.RegisterDepositRoutes(v1, authMiddleware)
