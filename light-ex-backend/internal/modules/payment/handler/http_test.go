@@ -111,6 +111,51 @@ func newTestRouter(actingUserID string, h *Handler) *gin.Engine {
 	return router
 }
 
+type stubPaymentGate struct {
+	allowed bool
+	err     error
+}
+
+func (g stubPaymentGate) PaymentAllowed(context.Context, uuid.UUID) (bool, error) {
+	return g.allowed, g.err
+}
+
+// TestRequireKYC_BlocksFundsMovementBeforeHandler checks that the KYC gate stops a
+// request before the provider is called, and fails closed on gate errors.
+func TestRequireKYC_BlocksFundsMovementBeforeHandler(t *testing.T) {
+	user := uuid.New().String()
+	for _, tc := range []struct {
+		name    string
+		gate    stubPaymentGate
+		want    int
+		wantErr string
+	}{
+		{"not approved", stubPaymentGate{allowed: false}, http.StatusForbidden, "KYC_VERIFICATION_REQUIRED"},
+		{"gate error", stubPaymentGate{err: errors.New("db down")}, http.StatusServiceUnavailable, "kyc status unavailable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			initiator := &fakeHTTPInitiator{}
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			authStub := func(c *gin.Context) {
+				c.Set(middleware.ContextUserID, user)
+				c.Next()
+			}
+			New(nil).RegisterDepositRoute(router.Group(""), authStub, RequireKYC(tc.gate), func(c *gin.Context) {
+				initiator.collectCalls++
+				c.Status(http.StatusOK)
+			})
+			res := postJSON(t, router, "/payments/deposits", `{}`)
+			if res.Code != tc.want || !strings.Contains(res.Body.String(), tc.wantErr) {
+				t.Fatalf("got %d %s, want %d %s", res.Code, res.Body.String(), tc.want, tc.wantErr)
+			}
+			if initiator.collectCalls != 0 {
+				t.Fatal("handler ran after KYC gate denied the request")
+			}
+		})
+	}
+}
+
 func postJSON(t *testing.T, router *gin.Engine, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 

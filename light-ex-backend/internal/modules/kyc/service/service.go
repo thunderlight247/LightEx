@@ -52,6 +52,16 @@ func (s *Service) Eligibility(ctx context.Context, user uuid.UUID) (domain.Eligi
 	return domain.AssessEligibility(submission), nil
 }
 
+// PaymentAllowed is the gate used by deposit and withdrawal routes. It is true only
+// when the latest submission is APPROVED. Any error or unexpected state denies access.
+func (s *Service) PaymentAllowed(ctx context.Context, user uuid.UUID) (bool, error) {
+	assessment, err := s.Eligibility(ctx, user)
+	if err != nil {
+		return false, err
+	}
+	return assessment.KYCState == "APPROVED", nil
+}
+
 // GrantReviewer and RevokeReviewer are operator actions keyed by account email.
 // They are not exposed over HTTP because the API has no administrator role.
 func (s *Service) GrantReviewer(ctx context.Context, email string) (uuid.UUID, error) {

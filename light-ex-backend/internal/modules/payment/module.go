@@ -15,6 +15,7 @@ type Module struct {
 	repo    repository.Repository
 	service *service.Service
 	db      *sql.DB
+	gate    handler.PaymentGate
 
 	handler *handler.Handler
 }
@@ -54,22 +55,44 @@ func (m *Module) Repository() repository.Repository {
 	return m.repo
 }
 
+// WithKYCGate requires a passing KYC status before deposits and withdrawals
+// are accepted. Routes are mounted with this gate after authentication.
+func (m *Module) WithKYCGate(gate handler.PaymentGate) *Module {
+	m.gate = gate
+	return m
+}
+
+// gated composes authentication with the KYC gate. Without a gate, funds
+// movement is never mounted.
+func (m *Module) gated(authMiddleware gin.HandlerFunc) (gin.HandlerFunc, bool) {
+	if m.gate == nil {
+		return nil, false
+	}
+	return authMiddleware, true
+}
+
 // RegisterDepositRoutes mounts POST /payments/deposits when the initiation
-// handler is attached.
+// handler is attached and a KYC gate is configured.
 func (m *Module) RegisterDepositRoutes(v1 *gin.RouterGroup, authMiddleware gin.HandlerFunc) {
 	if m.handler == nil {
 		return
 	}
-
-	m.handler.RegisterDepositRoute(v1, authMiddleware)
+	auth, ok := m.gated(authMiddleware)
+	if !ok {
+		return
+	}
+	m.handler.RegisterDepositRoute(v1, auth, handler.RequireKYC(m.gate))
 }
 
 // RegisterWithdrawalRoutes mounts POST /payments/withdrawals when the
-// initiation handler is attached.
+// initiation handler is attached and a KYC gate is configured.
 func (m *Module) RegisterWithdrawalRoutes(v1 *gin.RouterGroup, authMiddleware gin.HandlerFunc) {
 	if m.handler == nil {
 		return
 	}
-
-	m.handler.RegisterWithdrawalRoute(v1, authMiddleware)
+	auth, ok := m.gated(authMiddleware)
+	if !ok {
+		return
+	}
+	m.handler.RegisterWithdrawalRoute(v1, auth, handler.RequireKYC(m.gate))
 }

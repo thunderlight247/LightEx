@@ -394,6 +394,77 @@ func TestReviewerGrantAdministrationPostgres(t *testing.T) {
 	}
 }
 
+func TestPaymentAllowedOnlyForApprovedKYCPostgres(t *testing.T) {
+	db := fixture(t)
+	svc := service.New(postgres.New(db))
+	ctx := context.Background()
+	reviewer := addUser(t, db)
+	if _, err := db.Exec(`UPDATE users SET email_verified=true WHERE id=$1`, reviewer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO kyc_reviewers(user_id) VALUES ($1)`, reviewer); err != nil {
+		t.Fatal(err)
+	}
+	allowed := func(user uuid.UUID) bool {
+		t.Helper()
+		ok, err := svc.PaymentAllowed(ctx, user)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+
+	none := addUser(t, db)
+	if allowed(none) {
+		t.Fatal("user without a submission must not be allowed")
+	}
+
+	pending := addUser(t, db)
+	if _, err := svc.Submit(ctx, pending, "Test Person", "2000-01-01", "GH"); err != nil {
+		t.Fatal(err)
+	}
+	if allowed(pending) {
+		t.Fatal("pending submission must not be allowed")
+	}
+
+	rejected := addUser(t, db)
+	rej, err := svc.Submit(ctx, rejected, "Test Person", "2000-01-01", "GH")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Review(ctx, rej.ID, reviewer, domain.Rejected); err != nil {
+		t.Fatal(err)
+	}
+	if allowed(rejected) {
+		t.Fatal("rejected submission must not be allowed")
+	}
+
+	approved := addUser(t, db)
+	app, err := svc.Submit(ctx, approved, "Test Person", "2000-01-01", "GH")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Review(ctx, app.ID, reviewer, domain.Approved); err != nil {
+		t.Fatal(err)
+	}
+	if !allowed(approved) {
+		t.Fatal("approved submission must be allowed")
+	}
+}
+
+func TestPaymentAllowedFailsClosed(t *testing.T) {
+	user := uuid.New()
+	dbErr := errors.New("database unavailable")
+	ok, err := service.New(eligibilityRepository{err: dbErr}).PaymentAllowed(context.Background(), user)
+	if err == nil || ok {
+		t.Fatalf("repository error must deny: allowed=%v err=%v", ok, err)
+	}
+	ok, err = service.New(eligibilityRepository{submission: &domain.Submission{UserID: uuid.New(), Status: domain.Approved}}).PaymentAllowed(context.Background(), user)
+	if err == nil || ok {
+		t.Fatalf("mismatched user must deny: allowed=%v err=%v", ok, err)
+	}
+}
+
 func TestKYCHTTPUserIsolation(t *testing.T) {
 	db := fixture(t)
 	owner, other := addUser(t, db), addUser(t, db)

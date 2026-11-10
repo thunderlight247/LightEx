@@ -746,7 +746,7 @@ KYC foundation: migration `000007` persists self-reported legal name, date of bi
 
 Authenticated `GET /api/v1/kyc/eligibility` reports the caller's latest KYC review state (`NOT_SUBMITTED`, `PENDING`, `REJECTED`, `APPROVED`, or `UNKNOWN`) and a reason. It is provider-neutral and advisory: `payment_eligible` is always false, including after manual approval, because identity verification and policy controls do not yet exist. Lookup errors propagate rather than granting eligibility. PostgreSQL-backed lifecycle and failure tests cover this assessment.
 
-**Important:** deposit and withdrawal endpoints are not yet gated by KYC; eligibility enforcement, limits, risk controls, identity evidence and independent verification remain to be designed and implemented. Do not treat this foundation as production KYC or a regulatory control.
+**KYC gate:** `POST /payments/deposits` and `POST /payments/withdrawals` run after authentication and require the caller's latest KYC submission to be `APPROVED`; otherwise they return 403 `KYC_VERIFICATION_REQUIRED` before any provider call. Gate errors fail closed with 503. `APPROVED` is still a manual review result, not identity verification, so this is a basic gate rather than a full tier. Limits, risk controls, identity evidence and independent verification remain to be designed and implemented. Do not treat this foundation as production KYC or a regulatory control.
 
 - [ ] KYC workflow (submission foundation only; trusted review and identity verification remain)
 - [ ] User eligibility states
@@ -941,7 +941,7 @@ The migration naming is now standardized through `000005`; the previous typo `00
 ### 🔄 Phase 6 — KYC / Risk / Limits (in progress alongside outstanding Phase 5 work)
 
 1. KYC submission and grant-protected manual review foundation implemented; add identity evidence and verification before treating KYC as complete.
-2. An advisory, fail-closed KYC eligibility assessment exists; implement verified identity, eligibility tiers and enforcement on payment initiation before it can authorize funds movement.
+2. An advisory, fail-closed KYC eligibility assessment exists, and payment initiation requires an APPROVED submission. Still to do: verified identity evidence and distinct eligibility tiers before this is treated as a compliance control.
 3. Daily/monthly deposit and withdrawal limits.
 4. Risk controls and compliance restrictions.
 

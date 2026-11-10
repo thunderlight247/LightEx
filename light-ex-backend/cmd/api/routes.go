@@ -51,7 +51,8 @@ func RegisterRoutes(
 	walletModule.RegisterRoutes(v1, authMiddleware)
 
 	// KYC submissions and status are scoped to the authenticated user.
-	kyc.New(app.Database.SQL()).RegisterRoutes(v1, authMiddleware)
+	kycModule := kyc.New(app.Database.SQL())
+	kycModule.RegisterRoutes(v1, authMiddleware)
 
 	// Simulations are intentionally unavailable outside development.
 	if app.Config.App.Env == "development" {
@@ -68,7 +69,8 @@ func RegisterRoutes(
 	if mtnCfg.Collection.IsConfigured() || mtnCfg.Disbursement.IsConfigured() {
 		client := mtn.NewClient(mtnCfg)
 
-		paymentModule := payment.New(app.Database.SQL()).WithInitiator(client)
+		// Deposits and withdrawals require an APPROVED KYC submission.
+		paymentModule := payment.New(app.Database.SQL()).WithInitiator(client).WithKYCGate(kycModule.PaymentGate())
 
 		if mtnCfg.Collection.IsConfigured() {
 			paymentModule.RegisterDepositRoutes(v1, authMiddleware)

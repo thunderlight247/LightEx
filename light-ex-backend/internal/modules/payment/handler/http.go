@@ -29,14 +29,44 @@ func New(collector *service.Collector) *Handler {
 	}
 }
 
-// RegisterDepositRoute mounts POST /payments/deposits on the group.
-func (h *Handler) RegisterDepositRoute(router *gin.RouterGroup, authMiddleware gin.HandlerFunc) {
-	router.POST("/payments/deposits", authMiddleware, h.InitiateDeposit)
+// PaymentGate reports whether an authenticated user may move funds. It is
+// implemented by the KYC module so payments do not depend on KYC internals.
+type PaymentGate interface {
+	PaymentAllowed(ctx context.Context, user uuid.UUID) (bool, error)
 }
 
-// RegisterWithdrawalRoute mounts POST /payments/withdrawals on the group.
-func (h *Handler) RegisterWithdrawalRoute(router *gin.RouterGroup, authMiddleware gin.HandlerFunc) {
-	router.POST("/payments/withdrawals", authMiddleware, h.InitiateWithdrawal)
+// RequireKYC aborts deposits and withdrawals unless the authenticated user
+// passes the gate. Errors fail closed. It must run after authentication.
+func RequireKYC(gate PaymentGate) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, err := uuid.Parse(middleware.UserID(c))
+		if err != nil || userID == uuid.Nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, ErrorResponse{Error: "unauthorized"})
+			return
+		}
+		allowed, err := gate.PaymentAllowed(c.Request.Context(), userID)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, ErrorResponse{Error: "kyc status unavailable"})
+			return
+		}
+		if !allowed {
+			c.AbortWithStatusJSON(http.StatusForbidden, ErrorResponse{Error: "KYC_VERIFICATION_REQUIRED"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// RegisterDepositRoute mounts POST /payments/deposits on the group. The
+// middleware run in order before the handler (authentication, then KYC gate).
+func (h *Handler) RegisterDepositRoute(router *gin.RouterGroup, middleware ...gin.HandlerFunc) {
+	router.POST("/payments/deposits", append(middleware, h.InitiateDeposit)...)
+}
+
+// RegisterWithdrawalRoute mounts POST /payments/withdrawals on the group. The
+// middleware run in order before the handler (authentication, then KYC gate).
+func (h *Handler) RegisterWithdrawalRoute(router *gin.RouterGroup, middleware ...gin.HandlerFunc) {
+	router.POST("/payments/withdrawals", append(middleware, h.InitiateWithdrawal)...)
 }
 
 // InitiateDeposit starts a deposit for the authenticated user.
