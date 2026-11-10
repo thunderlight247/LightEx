@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/shopspring/decimal"
 
 	paymentdomain "github.com/light-group/light-ex-backend/internal/modules/payment/domain"
 	"github.com/light-group/light-ex-backend/internal/modules/payment/provider"
@@ -15,7 +16,25 @@ import (
 
 var (
 	ErrEmptyProviderReference = errors.New("provider returned no collection reference")
+	// ErrLimitExceeded is returned before any write or provider call when a
+	// request's amount is above the configured per-transaction maximum.
+	ErrLimitExceeded = errors.New("amount exceeds the per-transaction limit")
 )
+
+// Limits caps the amount of a single deposit or withdrawal. A zero value
+// means that direction is not limited.
+type Limits struct {
+	MaxDeposit    decimal.Decimal
+	MaxWithdrawal decimal.Decimal
+}
+
+// check rejects an amount above the configured maximum for the direction.
+func (l Limits) check(max, amount decimal.Decimal) error {
+	if max.IsPositive() && amount.GreaterThan(max) {
+		return fmt.Errorf("%w: maximum is %s", ErrLimitExceeded, max.String())
+	}
+	return nil
+}
 
 // ProviderInitiator starts external payment movements: it collects deposits
 // into LightEx and disburses withdrawals out. The MTN MoMo client implements
@@ -48,11 +67,20 @@ type CollectionResult struct {
 type Collector struct {
 	store     DepositStore
 	initiator ProviderInitiator
+	limits    Limits
 }
 
-// NewCollector creates an external money-movement initiator.
+// NewCollector creates an external money-movement initiator with no amount
+// limits. Use WithLimits to enforce per-transaction maximums.
 func NewCollector(store DepositStore, initiator ProviderInitiator) *Collector {
 	return &Collector{store: store, initiator: initiator}
+}
+
+// WithLimits returns a collector that enforces the given per-transaction
+// maximums before any write or provider call.
+func (c *Collector) WithLimits(limits Limits) *Collector {
+	c.limits = limits
+	return c
 }
 
 // InitiateDeposit records a PENDING deposit, starts the external collection
@@ -85,6 +113,9 @@ func (c *Collector) InitiateDeposit(ctx context.Context, in CollectionInput) (*C
 		in.Metadata,
 	)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.limits.check(c.limits.MaxDeposit, p.Amount); err != nil {
 		return nil, err
 	}
 
@@ -202,6 +233,9 @@ func (c *Collector) InitiateWithdrawal(ctx context.Context, in CollectionInput) 
 		in.Metadata,
 	)
 	if err != nil {
+		return nil, err
+	}
+	if err := c.limits.check(c.limits.MaxWithdrawal, p.Amount); err != nil {
 		return nil, err
 	}
 

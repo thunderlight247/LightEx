@@ -168,6 +168,8 @@ func respondToInitiationError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, ErrorResponse{Error: err.Error()})
 	case errors.Is(err, walletdomain.ErrInsufficientFunds):
 		c.JSON(http.StatusUnprocessableEntity, ErrorResponse{Error: "insufficient funds"})
+	case errors.Is(err, service.ErrLimitExceeded):
+		c.JSON(http.StatusUnprocessableEntity, ErrorResponse{Error: err.Error()})
 	case errors.Is(err, service.ErrDepositCurrencyMismatch),
 		errors.Is(err, walletdomain.ErrWalletNotActive),
 		errors.Is(err, mtn.ErrMissingCredentials),

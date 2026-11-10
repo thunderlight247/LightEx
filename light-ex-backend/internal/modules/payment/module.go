@@ -16,6 +16,7 @@ type Module struct {
 	service *service.Service
 	db      *sql.DB
 	gate    handler.PaymentGate
+	limits  service.Limits
 
 	handler *handler.Handler
 }
@@ -39,7 +40,7 @@ func (m *Module) WithInitiator(initiator service.ProviderInitiator) *Module {
 		return m
 	}
 
-	collector := service.NewCollector(service.NewSQLDepositStore(m.db), initiator)
+	collector := service.NewCollector(service.NewSQLDepositStore(m.db), initiator).WithLimits(m.limits)
 	m.handler = handler.New(collector)
 
 	return m
@@ -53,6 +54,13 @@ func (m *Module) Service() *service.Service {
 // Repository returns the underlying payment repository.
 func (m *Module) Repository() repository.Repository {
 	return m.repo
+}
+
+// WithLimits sets per-transaction deposit and withdrawal maximums. It must be
+// called before WithInitiator, which builds the collector that enforces them.
+func (m *Module) WithLimits(limits service.Limits) *Module {
+	m.limits = limits
+	return m
 }
 
 // WithKYCGate requires a passing KYC status before deposits and withdrawals
