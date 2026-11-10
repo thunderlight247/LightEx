@@ -3,6 +3,7 @@ package mtn
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -230,6 +231,20 @@ func SettlementProcessor(db *sql.DB, finder CallbackPaymentFinder, lookup Callba
 			}
 		}
 
+		// Out-of-order delivery: once a payment is terminal, a callback that agrees
+		// with the stored outcome (or is a PENDING update) is a no-op, so MTN stops
+		// retrying. A callback that contradicts the stored outcome is rejected.
+		if finder != nil && hashErr == nil {
+			if p, err := finder.FindByReference(ctx, normalized.ExternalID); err == nil && p != nil &&
+				p.Method == ProviderName && p.Reference == normalized.ExternalID &&
+				(p.Status == paymentdomain.StatusCompleted || p.Status == paymentdomain.StatusFailed) {
+				if lateCallbackAgrees(p.Status, normalized.Status) {
+					return nil
+				}
+				return ErrCallbackVerification
+			}
+		}
+
 		verified, err := VerifyCallback(ctx, finder, lookup, notif)
 		if err != nil {
 			return err
@@ -251,6 +266,36 @@ func SettlementProcessor(db *sql.DB, finder CallbackPaymentFinder, lookup Callba
 			})
 		}
 		return DeduplicatedProcessor(db, process)(c, notif)
+	}
+}
+
+// lateCallbackAgrees reports whether a callback for a terminal payment matches its
+// stored outcome. PENDING updates never move a terminal payment.
+func lateCallbackAgrees(stored paymentdomain.Status, callbackStatus string) bool {
+	switch callbackStatus {
+	case MTNStatusPending:
+		return true
+	case MTNStatusSuccessful:
+		return stored == paymentdomain.StatusCompleted
+	case MTNStatusFailed:
+		return stored == paymentdomain.StatusFailed
+	default:
+		return false
+	}
+}
+
+// RequireCallbackSecret guards a callback route whose final path segment is the
+// shared secret. Unknown or missing secrets get a 404 before the body is read, and
+// the comparison is constant time. An empty secret never matches.
+func RequireCallbackSecret(secret string, next gin.HandlerFunc) gin.HandlerFunc {
+	want := []byte(secret)
+	return func(c *gin.Context) {
+		got := []byte(c.Param("secret"))
+		if len(want) == 0 || subtle.ConstantTimeCompare(got, want) != 1 {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		next(c)
 	}
 }
 

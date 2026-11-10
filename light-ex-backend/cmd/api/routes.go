@@ -58,10 +58,9 @@ func RegisterRoutes(
 		liquidity.New(simulated.Scenario(app.Config.App.SimulatedLiquidityScenario)).RegisterRoutes(v1, authMiddleware)
 	}
 
-	// MTN MoMo provider. Intentionally unauthenticated callback route: caller
-	// authenticity is established by SettlementProcessor, which validates the
-	// callback against the stored payment and an authenticated MTN status
-	// lookup before anything is written. Initiation routes require the standard
+	// MTN MoMo provider. The callback route is guarded by a shared secret path
+	// segment, and SettlementProcessor also validates each callback against the
+	// stored payment and an authenticated MTN status lookup before anything is written. Initiation routes require the standard
 	// JWT auth middleware. Routes are mounted only when provider credentials are
 	// configured for the corresponding product, so production never exposes an
 	// endpoint it cannot service.
@@ -79,8 +78,12 @@ func RegisterRoutes(
 			paymentModule.RegisterWithdrawalRoutes(v1, authMiddleware)
 		}
 
-		v1.POST("/payments/webhooks/mtn", mtn.WebhookHandler(
-			mtn.SettlementProcessor(app.Database.SQL(), paymentModule.Repository(), client),
-		))
+		// The callback path carries a shared secret (MTN_CALLBACK_SECRET). Without
+		// one configured, the route is not mounted at all.
+		if mtnCfg.CallbackSecret != "" {
+			v1.POST("/payments/webhooks/mtn/:secret", mtn.RequireCallbackSecret(mtnCfg.CallbackSecret, mtn.WebhookHandler(
+				mtn.SettlementProcessor(app.Database.SQL(), paymentModule.Repository(), client),
+			)))
+		}
 	}
 }

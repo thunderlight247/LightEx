@@ -36,8 +36,11 @@ type Config struct {
 	Collection   SubscriptionConfig
 	Disbursement SubscriptionConfig
 	CallbackURL  string
-	Timeout      time.Duration
-	HTTPClient   *http.Client
+	// CallbackSecret is a shared secret embedded as the final path segment of the
+	// callback URL. Requests without it are rejected before the body is read.
+	CallbackSecret string
+	Timeout        time.Duration
+	HTTPClient     *http.Client
 }
 
 // LoadConfigFromEnv reads MTN configuration from environment variables and optionally .env.mtn.
@@ -68,7 +71,8 @@ func LoadConfigFromEnv() Config {
 			APIUser:         os.Getenv("MTN_DISBURSEMENT_API_USER"),
 			APIKey:          os.Getenv("MTN_DISBURSEMENT_API_KEY"),
 		},
-		CallbackURL: os.Getenv("MTN_CALLBACK_URL"),
-		Timeout:     DefaultTimeout,
+		CallbackURL:    os.Getenv("MTN_CALLBACK_URL"),
+		CallbackSecret: strings.TrimSpace(os.Getenv("MTN_CALLBACK_SECRET")),
+		Timeout:        DefaultTimeout,
 	}
 }

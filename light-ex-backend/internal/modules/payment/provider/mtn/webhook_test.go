@@ -516,6 +516,71 @@ func TestSettlementProcessor_DepositFailed_RejectedNoCredit(t *testing.T) {
 	}
 }
 
+func TestSettlementProcessor_LateCallbacks_Postgres(t *testing.T) {
+	dsn := os.Getenv("LIGHTEX_CALLBACK_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set LIGHTEX_CALLBACK_TEST_DATABASE_URL for PostgreSQL integration")
+	}
+	ctx := context.Background()
+	fx := newSettlementFixture(t, ctx, dsn, true)
+	server := mtnStatusServer(t, fx, "DEPOSIT", "SUCCESSFUL", nil)
+	r := settlementRoute(t, fx, server)
+	success := `{"externalId":"PAY-SETTLE","amount":"50","currency":"GHS","status":"SUCCESSFUL","financialTransactionId":"ft-1"}`
+	if got := sendSettlement(r, success); got != http.StatusOK {
+		t.Fatalf("settling callback: %d", got)
+	}
+	// A PENDING update arriving after completion is a no-op, not a retry trigger.
+	if got := sendSettlement(r, `{"externalId":"PAY-SETTLE","amount":"50","currency":"GHS","status":"PENDING"}`); got != http.StatusOK {
+		t.Fatalf("late pending callback: %d", got)
+	}
+	// A FAILED callback contradicting a completed payment is rejected without writes.
+	if got := sendSettlement(r, `{"externalId":"PAY-SETTLE","amount":"50","currency":"GHS","status":"FAILED"}`); got != http.StatusInternalServerError {
+		t.Fatalf("conflicting late callback: %d", got)
+	}
+	var status, balance string
+	if err := fx.db.QueryRowContext(ctx, `SELECT status FROM payments WHERE id=$1`, fx.payment).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if err := fx.db.QueryRowContext(ctx, `SELECT available_balance::text FROM wallets WHERE id=$1`, fx.wallet).Scan(&balance); err != nil {
+		t.Fatal(err)
+	}
+	if status != "COMPLETED" || balance != "150.00000000" {
+		t.Fatalf("late callbacks moved state: status=%s balance=%s", status, balance)
+	}
+}
+
+func TestRequireCallbackSecret(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	hit := 0
+	r := gin.New()
+	r.POST("/hook/:secret", RequireCallbackSecret("s3cret", func(c *gin.Context) {
+		hit++
+		c.Status(http.StatusOK)
+	}))
+	for path, want := range map[string]int{
+		"/hook/s3cret": http.StatusOK,
+		"/hook/wrong":  http.StatusNotFound,
+		"/hook/":       http.StatusNotFound,
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`)))
+		if w.Code != want {
+			t.Fatalf("%s: got %d want %d", path, w.Code, want)
+		}
+	}
+	if hit != 1 {
+		t.Fatalf("handler ran %d times, want 1", hit)
+	}
+
+	unset := gin.New()
+	unset.POST("/hook/:secret", RequireCallbackSecret("", func(c *gin.Context) { c.Status(http.StatusOK) }))
+	w := httptest.NewRecorder()
+	unset.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/hook/", strings.NewReader(`{}`)))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("empty secret must never match, got %d", w.Code)
+	}
+}
+
 // TestInitiateAndSettle_Postgres runs the full asynchronous deposit path with
 // the real MTN client against a mock MTN server: initiation records PROCESSING
 // with the provider reference, and the webhook then settles the callback.
